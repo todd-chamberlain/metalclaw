@@ -53,6 +53,15 @@ BUILTIN_MODELS: dict[str, dict] = {
         "context_window": 131072,
         "description": "Strong reasoning, large context window",
     },
+    "qwen3-coder-next": {
+        "name": "Qwen 3 Coder Next",
+        "url": "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF/resolve/main/Qwen3-Coder-Next-Q4_K_M.gguf",
+        "filename": "Qwen3-Coder-Next-Q4_K_M.gguf",
+        "size_gb": 48.5,
+        "min_memory_gb": 64,
+        "context_window": 32768,
+        "description": "Qwen 3 coding model with thinking/non-thinking modes",
+    },
     "deepseek-r1-70b": {
         "name": "DeepSeek R1 70B",
         "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Llama-70B-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
