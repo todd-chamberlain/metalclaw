@@ -39,7 +39,7 @@ def test_load_config_returns_defaults(tmp_path):
          patch("metalclaw.config.STATE_DIR", tmp_path / "state"):
         cfg = load_config()
     assert cfg["version"] == 1
-    assert cfg["gpu"]["backend"] == "vulkan"
+    assert cfg["gpu"]["backend"] == "metal"
 
 
 def test_save_and_load_roundtrip(tmp_path):

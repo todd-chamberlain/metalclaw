@@ -21,7 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cpus": 8,
     },
     "gpu": {
-        "backend": "vulkan",
+        "backend": "metal",  # "metal" (host Metal), "vulkan" (in-container), "cpu"
         "layers": -1,
     },
     "inference": {

@@ -11,8 +11,8 @@ from rich.console import Console
 
 console = Console()
 
-# Policies ship with the package
-POLICIES_DIR = Path(__file__).parent.parent.parent / "policies"
+# Policies ship inside the package
+POLICIES_DIR = Path(__file__).parent / "policies"
 
 
 @dataclass
@@ -21,6 +21,25 @@ class EndpointRule:
     ports: list[int] = field(default_factory=lambda: [443])
     protocol: str = "tcp"
     direction: str = "outbound"
+    # NemoClaw-compatible fields
+    binaries: list[str] = field(default_factory=list)
+    access: str = "full"  # "full" or "read-only" (GET/HEAD/OPTIONS only)
+    tls: str = "passthrough"  # "terminate" for L7 inspection, "passthrough" for TCP
+
+
+@dataclass
+class FilesystemPolicy:
+    """Filesystem isolation policy."""
+    read_only_root: bool = True
+    read_write: list[str] = field(default_factory=lambda: ["/sandbox", "/tmp"])
+    read_only: list[str] = field(default_factory=lambda: ["/usr", "/lib", "/etc"])
+
+
+@dataclass
+class ProcessPolicy:
+    """Process isolation policy."""
+    run_as_user: str = "sandbox"
+    run_as_group: str = "sandbox"
 
 
 @dataclass
@@ -30,6 +49,18 @@ class NetworkPolicy:
     default_action: str  # "deny" or "allow"
     allow_localhost: bool
     endpoints: list[EndpointRule] = field(default_factory=list)
+
+
+@dataclass
+class SandboxPolicy:
+    """Full sandbox policy combining network, filesystem, and process policies."""
+    version: int = 1
+    network: NetworkPolicy = field(default_factory=lambda: NetworkPolicy(
+        name="default", description="", default_action="deny",
+        allow_localhost=True,
+    ))
+    filesystem: FilesystemPolicy = field(default_factory=FilesystemPolicy)
+    process: ProcessPolicy = field(default_factory=ProcessPolicy)
 
 
 def _find_policy_file(name: str) -> Path | None:
@@ -42,6 +73,19 @@ def _find_policy_file(name: str) -> Path | None:
         if c.exists():
             return c
     return None
+
+
+def _parse_endpoint(ep: dict[str, Any]) -> EndpointRule:
+    """Parse a single endpoint rule from YAML dict."""
+    return EndpointRule(
+        host=ep.get("host", ""),
+        ports=ep.get("ports", [443]),
+        protocol=ep.get("protocol", "tcp"),
+        direction=ep.get("direction", "outbound"),
+        binaries=ep.get("binaries", []),
+        access=ep.get("access", "full"),
+        tls=ep.get("tls", "passthrough"),
+    )
 
 
 def load_policy(name: str) -> NetworkPolicy | None:
@@ -63,16 +107,7 @@ def load_policy(name: str) -> NetworkPolicy | None:
         return None
 
     net = data.get("network_policies", data)
-    endpoints = []
-    for ep in net.get("allowed_endpoints", []):
-        endpoints.append(
-            EndpointRule(
-                host=ep.get("host", ""),
-                ports=ep.get("ports", [443]),
-                protocol=ep.get("protocol", "tcp"),
-                direction=ep.get("direction", "outbound"),
-            )
-        )
+    endpoints = [_parse_endpoint(ep) for ep in net.get("allowed_endpoints", [])]
 
     return NetworkPolicy(
         name=data.get("name", name),
@@ -80,6 +115,47 @@ def load_policy(name: str) -> NetworkPolicy | None:
         default_action=net.get("default_action", "deny"),
         allow_localhost=net.get("allow_localhost", True),
         endpoints=endpoints,
+    )
+
+
+def load_sandbox_policy(name: str) -> SandboxPolicy:
+    """Load full sandbox policy (network + filesystem + process)."""
+    path = _find_policy_file(name)
+    if not path:
+        return SandboxPolicy()
+
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return SandboxPolicy()
+
+    if not isinstance(data, dict):
+        return SandboxPolicy()
+
+    # Parse network
+    net_policy = load_policy(name)
+
+    # Parse filesystem
+    fs_data = data.get("filesystem_policy", {})
+    fs = FilesystemPolicy(
+        read_only_root=fs_data.get("read_only_root", True),
+        read_write=fs_data.get("read_write", ["/sandbox", "/tmp"]),
+        read_only=fs_data.get("read_only", ["/usr", "/lib", "/etc"]),
+    )
+
+    # Parse process
+    proc_data = data.get("process", {})
+    proc = ProcessPolicy(
+        run_as_user=proc_data.get("run_as_user", "sandbox"),
+        run_as_group=proc_data.get("run_as_group", "sandbox"),
+    )
+
+    return SandboxPolicy(
+        version=data.get("version", 1),
+        network=net_policy or SandboxPolicy().network,
+        filesystem=fs,
+        process=proc,
     )
 
 
@@ -158,4 +234,6 @@ def print_policy(policy: NetworkPolicy) -> None:
         console.print(f"  Allowed endpoints:")
         for ep in policy.endpoints:
             ports = ",".join(str(p) for p in ep.ports)
-            console.print(f"    - {ep.host}:{ports} ({ep.protocol})")
+            access_tag = f" [{ep.access}]" if ep.access != "full" else ""
+            binary_tag = f" (binaries: {', '.join(ep.binaries)})" if ep.binaries else ""
+            console.print(f"    - {ep.host}:{ports} ({ep.protocol}){access_tag}{binary_tag}")

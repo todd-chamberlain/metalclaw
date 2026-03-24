@@ -123,12 +123,24 @@ def check_port(port: int = 8080) -> CheckResult:
         return CheckResult("port", True, f"Port {port} appears available")
 
 
+def check_cmake() -> CheckResult:
+    """Check cmake is installed (required for building Metal inference server)."""
+    path = shutil.which("cmake")
+    if not path:
+        return CheckResult(
+            "cmake", False, "Not found. Install: brew install cmake"
+        )
+    ver = _get_version("cmake")
+    return CheckResult("cmake", True, ver or f"Found at {path}")
+
+
 def run_preflight(port: int = 8080) -> PreflightReport:
     """Run all preflight checks and return report."""
     report = PreflightReport()
     report.checks.append(check_apple_silicon())
     report.checks.append(check_podman())
     report.checks.append(check_krunkit())
+    report.checks.append(check_cmake())
     report.checks.append(check_disk_space())
     report.checks.append(check_port(port))
     return report

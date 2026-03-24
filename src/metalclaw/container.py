@@ -14,7 +14,10 @@ from metalclaw.policy import NetworkPolicy, policy_to_podman_network
 console = Console()
 
 IMAGE_NAME = "metalclaw-sandbox"
-CONTAINER_DIR = Path(__file__).parent.parent.parent / "container"
+# Container dir: first check source tree, then fall back to package-relative
+_SRC_CONTAINER_DIR = Path(__file__).parent.parent.parent / "container"
+_PKG_CONTAINER_DIR = Path(__file__).parent / "container"
+CONTAINER_DIR = _SRC_CONTAINER_DIR if _SRC_CONTAINER_DIR.exists() else _PKG_CONTAINER_DIR
 
 # Ensure podman talks to the libkrun machine, not applehv
 _LIBKRUN_ENV = {**os.environ, "CONTAINERS_MACHINE_PROVIDER": "libkrun"}
@@ -102,8 +105,19 @@ def start_container(
     policy: NetworkPolicy | None = None,
     agent_type: str = "none",
     agent_command: str = "",
+    gpu_backend: str = "vulkan",
+    inference_url: str = "",
 ) -> bool:
-    """Create and start the sandbox container."""
+    """Create and start the sandbox container.
+
+    Args:
+        model_path: Path to the GGUF model file.
+        policy: Network policy to apply.
+        agent_type: Agent type (none, claude-code, custom).
+        agent_command: Custom agent command.
+        gpu_backend: GPU backend (metal, vulkan, cpu).
+        inference_url: URL of host inference server (metal mode).
+    """
     cfg = load_config()
     name = cfg["sandbox"]["name"]
     port = cfg["inference"]["port"]
@@ -125,6 +139,13 @@ def start_container(
     mem_limit = cfg["sandbox"]["memory_limit"]
     cpus = cfg["sandbox"]["cpus"]
 
+    # Filesystem policy: read-only root with writable /sandbox and /tmp
+    fs_policy = cfg.get("filesystem_policy", {})
+    read_only_root = fs_policy.get("read_only_root", True)
+
+    # Process policy
+    process_policy = cfg.get("process", {})
+
     # Build run command
     cmd = [
         "run", "-d",
@@ -132,16 +153,40 @@ def start_container(
         f"--memory={mem_limit}",
         f"--cpus={cpus}",
         "--pids-limit=4096",
-        "--device", "/dev/dri",
-        "-v", f"{model_path}:/models/model.gguf:ro",
-        "-p", f"127.0.0.1:{port}:{port}",
         f"--network={network}",
-        "-e", f"MODEL_PATH=/models/model.gguf",
-        "-e", f"PORT={port}",
-        "-e", f"CTX_SIZE={ctx_size}",
-        "-e", f"GPU_LAYERS={gpu_layers}",
+        "-e", f"GPU_BACKEND={gpu_backend}",
         "-e", f"AGENT_TYPE={agent_type}",
+        "-e", f"PORT={port}",
     ]
+
+    # Filesystem isolation
+    if read_only_root:
+        cmd.append("--read-only")
+        cmd.extend(["--tmpfs", "/tmp:rw,nosuid,nodev,size=1g"])
+        cmd.extend(["--tmpfs", "/sandbox:rw,nosuid,nodev,size=10g"])
+
+    # Process isolation
+    run_user = process_policy.get("run_as_user", "")
+    if run_user:
+        cmd.extend(["--user", run_user])
+
+    if gpu_backend == "metal" and inference_url:
+        # Metal mode: inference runs on host, container is agent/workspace only
+        cmd.extend([
+            "-e", f"INFERENCE_URL={inference_url}",
+        ])
+        # Don't need port mapping -- inference API is already on the host
+        # But map a port for any in-container services if needed
+    else:
+        # Vulkan/CPU mode: inference runs in container
+        cmd.extend([
+            "--device", "/dev/dri",
+            "-v", f"{model_path}:/models/model.gguf:ro",
+            "-p", f"127.0.0.1:{port}:{port}",
+            "-e", f"MODEL_PATH=/models/model.gguf",
+            "-e", f"CTX_SIZE={ctx_size}",
+            "-e", f"GPU_LAYERS={gpu_layers}",
+        ])
 
     if agent_command:
         cmd.extend(["-e", f"AGENT_COMMAND={agent_command}"])

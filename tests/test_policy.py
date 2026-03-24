@@ -2,7 +2,10 @@
 
 from metalclaw.policy import (
     EndpointRule,
+    FilesystemPolicy,
     NetworkPolicy,
+    ProcessPolicy,
+    SandboxPolicy,
     merge_policies,
     policy_to_podman_network,
 )
@@ -63,3 +66,52 @@ def test_merge_multiple_presets():
     assert len(merged.endpoints) == 2
     hosts = {ep.host for ep in merged.endpoints}
     assert hosts == {"a.com", "b.com"}
+
+
+def test_endpoint_rule_nemoclaw_fields():
+    """Endpoint rules support NemoClaw-compatible binary/access/tls fields."""
+    ep = EndpointRule(
+        host="api.github.com",
+        ports=[443],
+        binaries=["/usr/bin/git", "/usr/bin/curl"],
+        access="read-only",
+        tls="terminate",
+    )
+    assert ep.binaries == ["/usr/bin/git", "/usr/bin/curl"]
+    assert ep.access == "read-only"
+    assert ep.tls == "terminate"
+
+
+def test_endpoint_rule_defaults():
+    """Default values for NemoClaw fields."""
+    ep = EndpointRule(host="example.com")
+    assert ep.binaries == []
+    assert ep.access == "full"
+    assert ep.tls == "passthrough"
+    assert ep.ports == [443]
+    assert ep.protocol == "tcp"
+    assert ep.direction == "outbound"
+
+
+def test_filesystem_policy_defaults():
+    fs = FilesystemPolicy()
+    assert fs.read_only_root is True
+    assert "/sandbox" in fs.read_write
+    assert "/tmp" in fs.read_write
+
+
+def test_process_policy_defaults():
+    proc = ProcessPolicy()
+    assert proc.run_as_user == "sandbox"
+    assert proc.run_as_group == "sandbox"
+
+
+def test_sandbox_policy_composition():
+    sp = SandboxPolicy(
+        network=NetworkPolicy("test", "", "deny", True, []),
+        filesystem=FilesystemPolicy(read_only_root=True),
+        process=ProcessPolicy(run_as_user="agent"),
+    )
+    assert sp.network.default_action == "deny"
+    assert sp.filesystem.read_only_root is True
+    assert sp.process.run_as_user == "agent"

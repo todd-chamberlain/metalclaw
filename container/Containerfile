@@ -21,11 +21,14 @@ RUN dnf install -y \
     bash \
     && dnf clean all
 
-# Build llama.cpp with Vulkan backend (static linking avoids shared lib issues)
+# Build llama.cpp with Vulkan + RPC backends (static linking)
+# - Vulkan: for in-container GPU via Venus/virtio-gpu driver
+# - RPC: for offloading GPU work to host Metal via rpc-server
 RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
     && cd /tmp/llama.cpp \
     && cmake -B build \
         -DGGML_VULKAN=ON \
+        -DGGML_RPC=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLAMA_CURL=OFF \
         -DBUILD_SHARED_LIBS=OFF \

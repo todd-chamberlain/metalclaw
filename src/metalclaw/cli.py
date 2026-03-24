@@ -29,12 +29,12 @@ def main() -> None:
 @click.option("--skip-download", is_flag=True, help="Skip model download step")
 def onboard(model: str | None, skip_download: bool) -> None:
     """Set up metalclaw: preflight checks, GPU detection, model download, image build."""
-    from metalclaw import config, preflight, gpu, machine, models, container
+    from metalclaw import config, preflight, gpu, machine, models, container, metal
 
     console.print(f"\n[bold]Metalclaw Onboard[/bold] v{__version__}\n")
 
     # Step 1: Preflight
-    console.print("[bold]Step 1/3: Preflight checks[/bold]")
+    console.print("[bold]Step 1/4: Preflight checks[/bold]")
     report = preflight.run_preflight()
     preflight.print_report(report)
 
@@ -57,8 +57,9 @@ def onboard(model: str | None, skip_download: bool) -> None:
     else:
         cfg["inference"]["model"] = model or "qwen2.5-7b"
 
+    # Step 2: Machine
     console.print()
-    console.print("[bold]Initializing podman machine (libkrun)[/bold]")
+    console.print("[bold]Step 2/4: Podman machine (libkrun)[/bold]")
     if not machine.init_machine(
         cpus=cfg["machine"]["cpus"],
         memory_mb=cfg["machine"]["memory"],
@@ -71,9 +72,16 @@ def onboard(model: str | None, skip_download: bool) -> None:
 
     machine.verify_gpu()
 
-    # Step 2: Model + Image
+    # Step 3: Metal inference server (host-side)
     console.print()
-    console.print("[bold]Step 2/3: Model & container image[/bold]")
+    console.print("[bold]Step 3/4: Metal inference server + model + container[/bold]")
+
+    gpu_backend = cfg["gpu"]["backend"]
+    if gpu_backend == "metal":
+        console.print("Building host-side llama-server with Metal backend...")
+        if not metal.build_server():
+            console.print("[yellow]Metal build failed, falling back to vulkan backend[/yellow]")
+            cfg["gpu"]["backend"] = "vulkan"
 
     if not skip_download:
         model_key = cfg["inference"]["model"]
@@ -94,14 +102,15 @@ def onboard(model: str | None, skip_download: bool) -> None:
     else:
         console.print("[green]Container image already built[/green]")
 
-    # Step 3: Save config
+    # Step 4: Save config
     console.print()
-    console.print("[bold]Step 3/3: Saving configuration[/bold]")
+    console.print("[bold]Step 4/4: Saving configuration[/bold]")
     config.save_config(cfg)
     console.print(f"[green]Config saved to {config.CONFIG_PATH}[/green]")
 
     console.print()
     console.print("[bold green]Onboarding complete![/bold green]")
+    console.print(f"  GPU backend: [cyan]{cfg['gpu']['backend']}[/cyan]")
     console.print("Next: [cyan]metalclaw run[/cyan] to start the sandbox")
 
 
@@ -114,13 +123,20 @@ def onboard(model: str | None, skip_download: bool) -> None:
 @click.option("--agent", default=None, type=click.Choice(["none", "claude-code", "custom"]),
               help="Agent type to run inside sandbox")
 @click.option("--presets", default=None, help="Comma-separated policy presets")
-def run(model: str | None, agent: str | None, presets: str | None) -> None:
+@click.option("--gpu", "gpu_backend", default=None,
+              type=click.Choice(["metal", "vulkan", "cpu"]),
+              help="GPU backend override")
+def run(model: str | None, agent: str | None, presets: str | None,
+        gpu_backend: str | None) -> None:
     """Start the metalclaw sandbox with inference server."""
-    from metalclaw import config, machine, container, models, inference, policy, agent as agent_mod
+    from metalclaw import config, machine, container, models, inference, policy
+    from metalclaw import agent as agent_mod, metal
 
     cfg = config.load_config()
     model_key = model or cfg["inference"]["model"]
     agent_type = agent or cfg["agent"]["type"]
+    backend = gpu_backend or cfg["gpu"]["backend"]
+    port = cfg["inference"]["port"]
 
     console.print(f"\n[bold]Metalclaw Run[/bold]\n")
 
@@ -164,38 +180,68 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
 
     console.print("[bold]Configuration[/bold]")
     console.print(f"  Model: [cyan]{model_key}[/cyan] ({model_path})")
+    console.print(f"  GPU: [cyan]{backend}[/cyan]")
     console.print(f"  Agent: [cyan]{agent_cfg.agent_type}[/cyan]")
     policy.print_policy(final_policy)
 
-    # Ensure image exists
+    # Ensure container image exists
     if not container.image_exists():
         console.print("[yellow]Container image not found, building...[/yellow]")
         if not container.build_image():
             sys.exit(1)
 
-    # Start container
+    # ── Metal mode: start host inference server first ──────────────
+    inference_url = ""
+    if backend == "metal":
+        console.print()
+        console.print("[bold]Starting Metal inference server (host GPU)[/bold]")
+
+        if not metal.LLAMA_SERVER_BIN.exists():
+            console.print("Building llama-server with Metal backend...")
+            if not metal.build_server():
+                console.print("[red]Metal build failed. Try: metalclaw onboard[/red]")
+                sys.exit(1)
+
+        if not metal.start_server(model_path=model_path, port=port):
+            sys.exit(1)
+
+        # Wait for inference to be ready
+        if not inference.health_check(port):
+            console.print("[red]Metal inference server failed to start. Check: metalclaw logs[/red]")
+            metal.stop_server()
+            sys.exit(1)
+
+        inference.verify_model(port)
+        inference_url = f"http://host.containers.internal:{port}"
+
+    # ── Start container ────────────────────────────────────────────
     console.print()
-    console.print("[bold]Starting sandbox[/bold]")
+    console.print("[bold]Starting sandbox container[/bold]")
     if not container.start_container(
         model_path=model_path,
         policy=final_policy,
         agent_type=agent_cfg.agent_type,
         agent_command=agent_cfg.command,
+        gpu_backend=backend,
+        inference_url=inference_url,
     ):
+        if backend == "metal":
+            metal.stop_server()
         sys.exit(1)
 
-    # Health check
-    console.print()
-    console.print("[bold]Waiting for inference server[/bold]")
-    port = cfg["inference"]["port"]
-    if not inference.health_check(port):
-        console.print("[red]Inference server failed to start. Check logs: metalclaw logs[/red]")
-        sys.exit(1)
-
-    inference.verify_model(port)
+    # ── Health check (vulkan/cpu mode only -- metal already checked) ──
+    if backend != "metal":
+        console.print()
+        console.print("[bold]Waiting for inference server[/bold]")
+        if not inference.health_check(port):
+            console.print("[red]Inference server failed to start. Check: metalclaw logs[/red]")
+            sys.exit(1)
+        inference.verify_model(port)
 
     console.print()
     console.print("[bold green]Sandbox is running![/bold green]")
+    if backend == "metal":
+        console.print(f"  GPU: [cyan]Metal (native Apple GPU)[/cyan]")
     console.print(f"  API: [cyan]http://127.0.0.1:{port}/v1[/cyan]")
     console.print(f"  Shell: [cyan]metalclaw connect[/cyan]")
     console.print(f"  Logs: [cyan]metalclaw logs[/cyan]")
@@ -209,10 +255,11 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
 @main.command()
 def status() -> None:
     """Show status of machine, container, and inference server."""
-    from metalclaw import machine, container, inference, config
+    from metalclaw import machine, container, inference, config, metal
 
     cfg = config.load_config()
     port = cfg["inference"]["port"]
+    backend = cfg["gpu"]["backend"]
 
     console.print(f"\n[bold]Metalclaw Status[/bold]\n")
 
@@ -223,6 +270,13 @@ def status() -> None:
         console.print(f"  Machine: {state} (provider={ms.provider}, cpus={ms.cpus})")
     else:
         console.print("  Machine: [red]not initialized[/red]")
+
+    # Metal server (host-side)
+    if backend == "metal":
+        if metal.server_running():
+            console.print(f"  Metal server: [green]running[/green]")
+        else:
+            console.print(f"  Metal server: [dim]not running[/dim]")
 
     # Container
     name = cfg["sandbox"]["name"]
@@ -238,7 +292,7 @@ def status() -> None:
         import httpx
         resp = httpx.get(f"http://127.0.0.1:{port}/health", timeout=3.0)
         if resp.status_code == 200:
-            console.print(f"  Inference: [green]healthy[/green] (port {port})")
+            console.print(f"  Inference: [green]healthy[/green] (port {port}, backend={backend})")
         else:
             console.print(f"  Inference: [yellow]unhealthy (HTTP {resp.status_code})[/yellow]")
     except Exception:
@@ -253,11 +307,16 @@ def status() -> None:
 @click.option("--machine", "stop_machine", is_flag=True, help="Also stop the podman machine")
 def stop(stop_machine: bool) -> None:
     """Stop the sandbox container (and optionally the machine)."""
-    from metalclaw import container, machine as mach
+    from metalclaw import container, machine as mach, metal, config
 
     console.print("\n[bold]Metalclaw Stop[/bold]\n")
 
     container.stop_container()
+
+    # Stop host Metal inference server if running
+    cfg = config.load_config()
+    if cfg["gpu"]["backend"] == "metal":
+        metal.stop_server()
 
     if stop_machine:
         mach.stop_machine()
@@ -383,6 +442,24 @@ def policy_show(name: str) -> None:
     p = load_policy(name)
     if p:
         print_policy(p)
+
+
+# ---------------------------------------------------------------------------
+# build (new: rebuild host Metal server)
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.option("--force", is_flag=True, help="Force rebuild even if binary exists")
+def build(force: bool) -> None:
+    """Build the host-side Metal inference server."""
+    from metalclaw import metal
+
+    console.print("\n[bold]Building Metal inference server[/bold]\n")
+    if metal.build_server(force=force):
+        console.print("[green]Build complete[/green]")
+    else:
+        console.print("[red]Build failed[/red]")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
