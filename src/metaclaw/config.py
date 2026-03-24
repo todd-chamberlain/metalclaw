@@ -40,7 +40,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "machine": {
         "provider": "libkrun",
         "cpus": 8,
-        "memory": 65536,
+        "memory": 61440,  # krunkit max is 61440 MiB (60 GB)
         "disk": 100,
     },
 }

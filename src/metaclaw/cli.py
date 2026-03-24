@@ -53,7 +53,7 @@ def onboard(model: str | None, skip_download: bool) -> None:
     cfg = config.load_config()
     if gpu_info.unified_memory_gb >= 64:
         cfg["inference"]["model"] = model or "qwen2.5-72b"
-        cfg["machine"]["memory"] = min(gpu_info.unified_memory_gb * 1024, 131072)
+        cfg["machine"]["memory"] = min(gpu_info.unified_memory_gb * 1024, 61440)
     else:
         cfg["inference"]["model"] = model or "qwen2.5-7b"
 
@@ -291,9 +291,15 @@ def logs(tail: int, follow: bool) -> None:
     if follow:
         import os
         from metaclaw.config import load_config
+        from metaclaw.container import _LIBKRUN_ENV
         cfg = load_config()
         name = cfg["sandbox"]["name"]
-        os.execvp("podman", ["podman", "logs", "-f", "--tail", str(tail), name])
+        os.execve(
+            "/usr/bin/env",
+            ["env", "CONTAINERS_MACHINE_PROVIDER=libkrun",
+             "podman", "logs", "-f", "--tail", str(tail), name],
+            _LIBKRUN_ENV,
+        )
     else:
         output = container.get_logs(tail=tail)
         console.print(output)

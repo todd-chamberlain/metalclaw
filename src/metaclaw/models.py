@@ -28,17 +28,17 @@ REGISTRY_PATH = MODELS_DIR / "registry.json"
 BUILTIN_MODELS: dict[str, dict] = {
     "qwen2.5-7b": {
         "name": "Qwen 2.5 7B Instruct",
-        "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
-        "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
-        "size_gb": 4.4,
+        "url": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        "size_gb": 4.7,
         "min_memory_gb": 8,
         "context_window": 32768,
         "description": "Fast, good for testing and light tasks",
     },
     "qwen2.5-72b": {
         "name": "Qwen 2.5 72B Instruct",
-        "url": "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct-GGUF/resolve/main/qwen2.5-72b-instruct-q4_k_m.gguf",
-        "filename": "qwen2.5-72b-instruct-q4_k_m.gguf",
+        "url": "https://huggingface.co/bartowski/Qwen2.5-72B-Instruct-GGUF/resolve/main/Qwen2.5-72B-Instruct-Q4_K_M.gguf",
+        "filename": "Qwen2.5-72B-Instruct-Q4_K_M.gguf",
         "size_gb": 42.0,
         "min_memory_gb": 64,
         "context_window": 32768,

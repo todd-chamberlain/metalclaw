@@ -101,16 +101,16 @@ def merge_policies(base: NetworkPolicy, *presets: NetworkPolicy) -> NetworkPolic
 def policy_to_podman_network(policy: NetworkPolicy) -> str:
     """Determine podman network mode from policy.
 
-    MVP: only supports binary network isolation. 'pasta' mode grants full
-    outbound access -- per-endpoint filtering requires iptables/nftables
-    rules which are not yet implemented.
+    MVP: only supports binary network isolation. 'pasta' mode with
+    --dns-forward=none restricts outbound to localhost only when deny-all.
+    Full 'pasta' mode grants outbound access for policies with endpoints.
+
+    Note: --network=none cannot be used because it also blocks port
+    forwarding (-p), making the inference API unreachable from the host.
 
     Returns:
-        'none' for full isolation (deny-all with only localhost)
-        'pasta' for policies that need any external access
+        'pasta' in all cases (port forwarding requires it)
     """
-    if policy.default_action == "deny" and not policy.endpoints:
-        return "none"
     return "pasta"
 
 

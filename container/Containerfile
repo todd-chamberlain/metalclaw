@@ -5,6 +5,10 @@ RUN dnf install -y \
     mesa-vulkan-drivers \
     vulkan-loader \
     vulkan-tools \
+    vulkan-headers \
+    vulkan-loader-devel \
+    glslang \
+    glslc \
     cmake \
     gcc-c++ \
     git \
@@ -17,13 +21,14 @@ RUN dnf install -y \
     bash \
     && dnf clean all
 
-# Build llama.cpp with Vulkan backend
+# Build llama.cpp with Vulkan backend (static linking avoids shared lib issues)
 RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
     && cd /tmp/llama.cpp \
     && cmake -B build \
         -DGGML_VULKAN=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLAMA_CURL=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
     && cmake --build build --config Release -j$(nproc) --target llama-server \
     && cp build/bin/llama-server /usr/local/bin/ \
     && rm -rf /tmp/llama.cpp

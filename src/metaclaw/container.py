@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,9 @@ console = Console()
 IMAGE_NAME = "metaclaw-sandbox"
 CONTAINER_DIR = Path(__file__).parent.parent.parent / "container"
 
+# Ensure podman talks to the libkrun machine, not applehv
+_LIBKRUN_ENV = {**os.environ, "CONTAINERS_MACHINE_PROVIDER": "libkrun"}
+
 
 def _podman(*args: str, check: bool = True,
             timeout: int = 600) -> subprocess.CompletedProcess[str]:
@@ -25,6 +29,7 @@ def _podman(*args: str, check: bool = True,
             text=True,
             timeout=timeout,
             check=check,
+            env=_LIBKRUN_ENV,
         )
     except FileNotFoundError:
         raise RuntimeError("podman not found. Install: brew install podman")
@@ -184,7 +189,12 @@ def exec_shell(name: str | None = None) -> None:
         console.print("[red]Container is not running[/red]")
         return
 
-    os.execvp("podman", ["podman", "exec", "-it", name, "/bin/bash"])
+    os.execve(
+        "/usr/bin/env",
+        ["env", "CONTAINERS_MACHINE_PROVIDER=libkrun",
+         "podman", "exec", "-it", name, "/bin/bash"],
+        _LIBKRUN_ENV,
+    )
 
 
 def get_logs(name: str | None = None, tail: int = 100) -> str:

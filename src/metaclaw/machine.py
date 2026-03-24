@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -13,6 +14,9 @@ from metaclaw.config import load_config
 console = Console()
 
 MACHINE_NAME = "metaclaw"
+
+# Force libkrun provider for GPU passthrough on all podman machine commands
+_LIBKRUN_ENV = {**os.environ, "CONTAINERS_MACHINE_PROVIDER": "libkrun"}
 
 
 @dataclass
@@ -33,6 +37,7 @@ def _podman(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
             text=True,
             timeout=300,
             check=check,
+            env=_LIBKRUN_ENV,
         )
     except FileNotFoundError:
         raise RuntimeError("podman not found. Install: brew install podman")
@@ -49,6 +54,8 @@ def get_status() -> MachineStatus:
         data = json.loads(result.stdout)
         # podman machine inspect returns a list
         info = data[0] if isinstance(data, list) and data else data
+        if not isinstance(info, dict):
+            return MachineStatus(False, False, "", 0, 0, 0)
         return MachineStatus(
             exists=True,
             running=info.get("State", "") == "running",
@@ -72,7 +79,7 @@ def init_machine(cpus: int | None = None, memory_mb: int | None = None,
 
     status = get_status()
     if status.exists:
-        if status.provider != "libkrun":
+        if status.provider and status.provider != "libkrun":
             console.print(
                 f"[yellow]Machine '{MACHINE_NAME}' exists but uses provider "
                 f"'{status.provider}' instead of libkrun.[/yellow]"
@@ -84,7 +91,7 @@ def init_machine(cpus: int | None = None, memory_mb: int | None = None,
         console.print(f"[green]Machine '{MACHINE_NAME}' already exists[/green]")
         return True
 
-    console.print(f"Initializing podman machine with libkrun (GPU passthrough)...")
+    console.print("Initializing podman machine with libkrun (GPU passthrough)...")
     try:
         _podman(
             "init",
@@ -92,7 +99,6 @@ def init_machine(cpus: int | None = None, memory_mb: int | None = None,
             f"--cpus={cpus}",
             f"--memory={memory_mb}",
             f"--disk-size={disk_gb}",
-            "--provider=libkrun",
         )
         console.print("[green]Machine initialized[/green]")
         return True
@@ -114,6 +120,11 @@ def start_machine() -> bool:
     console.print("Starting podman machine...")
     try:
         _podman("start", MACHINE_NAME)
+        # Set this machine as the default podman connection
+        subprocess.run(
+            ["podman", "system", "connection", "default", MACHINE_NAME],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
         console.print("[green]Machine started[/green]")
         return True
     except subprocess.CalledProcessError as e:
@@ -144,6 +155,7 @@ def verify_gpu() -> bool:
             ["podman", "machine", "ssh", MACHINE_NAME, "--",
              "vulkaninfo", "--summary"],
             capture_output=True, text=True, timeout=30, check=False,
+            env=_LIBKRUN_ENV,
         )
         if "Venus" in result.stdout or "Virtio" in result.stdout:
             console.print("[green]  GPU passthrough verified (Venus/Virtio)[/green]")
