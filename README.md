@@ -20,9 +20,17 @@ For 70B+ models: M-series Ultra or Pro with 64 GB+ unified memory recommended.
 ## Install
 
 ```bash
+brew install podman krunkit pipx
+
 git clone https://github.com/todd-chamberlain/metalclaw.git
 cd metalclaw
-pip install -e .
+pipx install -e . --python python3.12
+```
+
+This puts `metalclaw` on your PATH immediately. Verify with:
+
+```bash
+metalclaw --version
 ```
 
 ## Quick Start
