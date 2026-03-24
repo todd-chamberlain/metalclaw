@@ -1,0 +1,15 @@
+name: npm
+description: npm registry access for package installation
+
+network_policies:
+  default_action: deny
+  allow_localhost: true
+  allowed_endpoints:
+    - host: registry.npmjs.org
+      ports: [443]
+      protocol: tcp
+      direction: outbound
+    - host: "*.npmjs.com"
+      ports: [443]
+      protocol: tcp
+      direction: outbound

@@ -1,0 +1,7 @@
+name: default
+description: Deny-all network policy with localhost inference access
+
+network_policies:
+  default_action: deny
+  allow_localhost: true
+  allowed_endpoints: []

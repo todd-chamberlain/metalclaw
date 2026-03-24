@@ -1,0 +1,19 @@
+name: github
+description: Git and GitHub CLI access
+
+network_policies:
+  default_action: deny
+  allow_localhost: true
+  allowed_endpoints:
+    - host: github.com
+      ports: [443]
+      protocol: tcp
+      direction: outbound
+    - host: api.github.com
+      ports: [443]
+      protocol: tcp
+      direction: outbound
+    - host: "*.githubusercontent.com"
+      ports: [443]
+      protocol: tcp
+      direction: outbound

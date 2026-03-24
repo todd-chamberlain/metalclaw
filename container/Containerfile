@@ -1,0 +1,51 @@
+FROM registry.fedoraproject.org/fedora:40
+
+# System packages: Vulkan drivers (Venus/virtio-gpu), build tools, runtimes
+RUN dnf install -y \
+    mesa-vulkan-drivers \
+    vulkan-loader \
+    vulkan-tools \
+    cmake \
+    gcc-c++ \
+    git \
+    python3 \
+    python3-pip \
+    curl \
+    ca-certificates \
+    nodejs \
+    npm \
+    bash \
+    && dnf clean all
+
+# Build llama.cpp with Vulkan backend
+RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
+    && cd /tmp/llama.cpp \
+    && cmake -B build \
+        -DGGML_VULKAN=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_CURL=OFF \
+    && cmake --build build --config Release -j$(nproc) --target llama-server \
+    && cp build/bin/llama-server /usr/local/bin/ \
+    && rm -rf /tmp/llama.cpp
+
+# Install Claude Code CLI for agent mode
+RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+
+# Sandbox user and directories
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /models /sandbox /etc/metaclaw \
+    && chown sandbox:sandbox /sandbox
+
+# Entrypoint and agent scripts
+COPY metaclaw-start.sh /usr/local/bin/metaclaw-start.sh
+COPY agent-wrapper.sh /usr/local/bin/agent-wrapper.sh
+RUN chmod +x /usr/local/bin/metaclaw-start.sh /usr/local/bin/agent-wrapper.sh
+
+# Config directory is read-only at runtime
+VOLUME ["/models"]
+WORKDIR /sandbox
+USER sandbox
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/metaclaw-start.sh"]
