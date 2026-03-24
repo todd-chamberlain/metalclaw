@@ -6,5 +6,5 @@ dist/
 build/
 .venv/
 *.gguf
-.metaclaw/
+.metalclaw/
 .pytest_cache/

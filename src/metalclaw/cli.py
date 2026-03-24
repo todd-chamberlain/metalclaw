@@ -8,15 +8,15 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from metaclaw import __version__
+from metalclaw import __version__
 
 console = Console()
 
 
 @click.group()
-@click.version_option(__version__, prog_name="metaclaw")
+@click.version_option(__version__, prog_name="metalclaw")
 def main() -> None:
-    """Metaclaw: Sandboxed GPU-accelerated AI agent runtime for Apple Silicon."""
+    """Metalclaw: Sandboxed GPU-accelerated AI agent runtime for Apple Silicon."""
     pass
 
 
@@ -28,10 +28,10 @@ def main() -> None:
 @click.option("--model", default=None, help="Model to download (e.g. qwen2.5-7b)")
 @click.option("--skip-download", is_flag=True, help="Skip model download step")
 def onboard(model: str | None, skip_download: bool) -> None:
-    """Set up metaclaw: preflight checks, GPU detection, model download, image build."""
-    from metaclaw import config, preflight, gpu, machine, models, container
+    """Set up metalclaw: preflight checks, GPU detection, model download, image build."""
+    from metalclaw import config, preflight, gpu, machine, models, container
 
-    console.print(f"\n[bold]Metaclaw Onboard[/bold] v{__version__}\n")
+    console.print(f"\n[bold]Metalclaw Onboard[/bold] v{__version__}\n")
 
     # Step 1: Preflight
     console.print("[bold]Step 1/3: Preflight checks[/bold]")
@@ -102,7 +102,7 @@ def onboard(model: str | None, skip_download: bool) -> None:
 
     console.print()
     console.print("[bold green]Onboarding complete![/bold green]")
-    console.print("Next: [cyan]metaclaw run[/cyan] to start the sandbox")
+    console.print("Next: [cyan]metalclaw run[/cyan] to start the sandbox")
 
 
 # ---------------------------------------------------------------------------
@@ -115,19 +115,19 @@ def onboard(model: str | None, skip_download: bool) -> None:
               help="Agent type to run inside sandbox")
 @click.option("--presets", default=None, help="Comma-separated policy presets")
 def run(model: str | None, agent: str | None, presets: str | None) -> None:
-    """Start the metaclaw sandbox with inference server."""
-    from metaclaw import config, machine, container, models, inference, policy, agent as agent_mod
+    """Start the metalclaw sandbox with inference server."""
+    from metalclaw import config, machine, container, models, inference, policy, agent as agent_mod
 
     cfg = config.load_config()
     model_key = model or cfg["inference"]["model"]
     agent_type = agent or cfg["agent"]["type"]
 
-    console.print(f"\n[bold]Metaclaw Run[/bold]\n")
+    console.print(f"\n[bold]Metalclaw Run[/bold]\n")
 
     # Ensure machine is running
     ms = machine.get_status()
     if not ms.exists:
-        console.print("[red]Machine not initialized. Run: metaclaw onboard[/red]")
+        console.print("[red]Machine not initialized. Run: metalclaw onboard[/red]")
         sys.exit(1)
     if not ms.running:
         if not machine.start_machine():
@@ -136,7 +136,7 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
     # Resolve model path
     model_path = models.get_model_path(model_key)
     if not model_path:
-        console.print(f"[red]Model '{model_key}' not found. Run: metaclaw model pull {model_key}[/red]")
+        console.print(f"[red]Model '{model_key}' not found. Run: metalclaw model pull {model_key}[/red]")
         sys.exit(1)
 
     # Build policy
@@ -189,7 +189,7 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
     console.print("[bold]Waiting for inference server[/bold]")
     port = cfg["inference"]["port"]
     if not inference.health_check(port):
-        console.print("[red]Inference server failed to start. Check logs: metaclaw logs[/red]")
+        console.print("[red]Inference server failed to start. Check logs: metalclaw logs[/red]")
         sys.exit(1)
 
     inference.verify_model(port)
@@ -197,9 +197,9 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
     console.print()
     console.print("[bold green]Sandbox is running![/bold green]")
     console.print(f"  API: [cyan]http://127.0.0.1:{port}/v1[/cyan]")
-    console.print(f"  Shell: [cyan]metaclaw connect[/cyan]")
-    console.print(f"  Logs: [cyan]metaclaw logs[/cyan]")
-    console.print(f"  Stop: [cyan]metaclaw stop[/cyan]")
+    console.print(f"  Shell: [cyan]metalclaw connect[/cyan]")
+    console.print(f"  Logs: [cyan]metalclaw logs[/cyan]")
+    console.print(f"  Stop: [cyan]metalclaw stop[/cyan]")
 
 
 # ---------------------------------------------------------------------------
@@ -209,12 +209,12 @@ def run(model: str | None, agent: str | None, presets: str | None) -> None:
 @main.command()
 def status() -> None:
     """Show status of machine, container, and inference server."""
-    from metaclaw import machine, container, inference, config
+    from metalclaw import machine, container, inference, config
 
     cfg = config.load_config()
     port = cfg["inference"]["port"]
 
-    console.print(f"\n[bold]Metaclaw Status[/bold]\n")
+    console.print(f"\n[bold]Metalclaw Status[/bold]\n")
 
     # Machine
     ms = machine.get_status()
@@ -253,9 +253,9 @@ def status() -> None:
 @click.option("--machine", "stop_machine", is_flag=True, help="Also stop the podman machine")
 def stop(stop_machine: bool) -> None:
     """Stop the sandbox container (and optionally the machine)."""
-    from metaclaw import container, machine as mach
+    from metalclaw import container, machine as mach
 
-    console.print("\n[bold]Metaclaw Stop[/bold]\n")
+    console.print("\n[bold]Metalclaw Stop[/bold]\n")
 
     container.stop_container()
 
@@ -272,7 +272,7 @@ def stop(stop_machine: bool) -> None:
 @main.command()
 def connect() -> None:
     """Open an interactive shell inside the sandbox container."""
-    from metaclaw import container
+    from metalclaw import container
 
     container.exec_shell()
 
@@ -286,12 +286,12 @@ def connect() -> None:
 @click.option("-f", "--follow", is_flag=True, help="Follow log output")
 def logs(tail: int, follow: bool) -> None:
     """Show container logs."""
-    from metaclaw import container
+    from metalclaw import container
 
     if follow:
         import os
-        from metaclaw.config import load_config
-        from metaclaw.container import _LIBKRUN_ENV
+        from metalclaw.config import load_config
+        from metalclaw.container import _LIBKRUN_ENV
         cfg = load_config()
         name = cfg["sandbox"]["name"]
         os.execve(
@@ -318,7 +318,7 @@ def model() -> None:
 @model.command("list")
 def model_list() -> None:
     """List available and downloaded models."""
-    from metaclaw.models import list_available
+    from metalclaw.models import list_available
 
     table = Table(title="Models")
     table.add_column("Key", style="cyan")
@@ -344,7 +344,7 @@ def model_list() -> None:
 @click.argument("model_key")
 def model_pull(model_key: str) -> None:
     """Download a model from the registry."""
-    from metaclaw.models import pull_model
+    from metalclaw.models import pull_model
 
     pull_model(model_key)
 
@@ -362,7 +362,7 @@ def policy() -> None:
 @policy.command("list")
 def policy_list() -> None:
     """List available policy presets."""
-    from metaclaw.policy import list_presets
+    from metalclaw.policy import list_presets
 
     table = Table(title="Policy Presets")
     table.add_column("Name", style="cyan")
@@ -378,7 +378,7 @@ def policy_list() -> None:
 @click.argument("name")
 def policy_show(name: str) -> None:
     """Show details of a policy."""
-    from metaclaw.policy import load_policy, print_policy
+    from metalclaw.policy import load_policy, print_policy
 
     p = load_policy(name)
     if p:

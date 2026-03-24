@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from metaclaw.gpu import detect_apple_silicon
+from metalclaw.gpu import detect_apple_silicon
 
 console = Console()
 

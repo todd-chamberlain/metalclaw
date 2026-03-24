@@ -1,4 +1,4 @@
-"""Load/save ~/.metaclaw/config.yaml with sensible defaults for Apple Silicon."""
+"""Load/save ~/.metalclaw/config.yaml with sensible defaults for Apple Silicon."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from typing import Any
 
 import yaml
 
-METACLAW_HOME = Path(os.environ.get("METACLAW_HOME", Path.home() / ".metaclaw"))
-CONFIG_PATH = METACLAW_HOME / "config.yaml"
-MODELS_DIR = METACLAW_HOME / "models"
-STATE_DIR = METACLAW_HOME / "state"
+METALCLAW_HOME = Path(os.environ.get("METALCLAW_HOME", Path.home() / ".metalclaw"))
+CONFIG_PATH = METALCLAW_HOME / "config.yaml"
+MODELS_DIR = METALCLAW_HOME / "models"
+STATE_DIR = METALCLAW_HOME / "state"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": 1,
     "sandbox": {
-        "name": "metaclaw-sandbox",
+        "name": "metalclaw-sandbox",
         "memory_limit": "64g",
         "cpus": 8,
     },
@@ -58,8 +58,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def ensure_dirs() -> None:
-    """Create metaclaw home directories if they don't exist."""
-    for d in (METACLAW_HOME, MODELS_DIR, STATE_DIR):
+    """Create metalclaw home directories if they don't exist."""
+    for d in (METALCLAW_HOME, MODELS_DIR, STATE_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

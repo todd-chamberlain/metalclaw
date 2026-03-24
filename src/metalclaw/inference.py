@@ -8,7 +8,7 @@ import time
 import httpx
 from rich.console import Console
 
-from metaclaw.config import load_config
+from metalclaw.config import load_config
 
 console = Console()
 

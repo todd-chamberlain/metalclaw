@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from metaclaw.preflight import (
+from metalclaw.preflight import (
     CheckResult,
     PreflightReport,
     _parse_podman_version,

@@ -9,11 +9,11 @@ from dataclasses import dataclass
 
 from rich.console import Console
 
-from metaclaw.config import load_config
+from metalclaw.config import load_config
 
 console = Console()
 
-MACHINE_NAME = "metaclaw"
+MACHINE_NAME = "metalclaw"
 
 # Force libkrun provider for GPU passthrough on all podman machine commands
 _LIBKRUN_ENV = {**os.environ, "CONTAINERS_MACHINE_PROVIDER": "libkrun"}
@@ -85,7 +85,7 @@ def init_machine(cpus: int | None = None, memory_mb: int | None = None,
                 f"'{status.provider}' instead of libkrun.[/yellow]"
             )
             console.print(
-                "[yellow]Remove it with: podman machine rm metaclaw[/yellow]"
+                "[yellow]Remove it with: podman machine rm metalclaw[/yellow]"
             )
             return False
         console.print(f"[green]Machine '{MACHINE_NAME}' already exists[/green]")
@@ -111,7 +111,7 @@ def start_machine() -> bool:
     """Start the podman machine."""
     status = get_status()
     if not status.exists:
-        console.print("[red]Machine not initialized. Run: metaclaw onboard[/red]")
+        console.print("[red]Machine not initialized. Run: metalclaw onboard[/red]")
         return False
     if status.running:
         console.print("[green]Machine already running[/green]")

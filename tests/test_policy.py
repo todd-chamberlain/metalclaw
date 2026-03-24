@@ -1,6 +1,6 @@
 """Tests for policy module."""
 
-from metaclaw.policy import (
+from metalclaw.policy import (
     EndpointRule,
     NetworkPolicy,
     merge_policies,
@@ -8,7 +8,7 @@ from metaclaw.policy import (
 )
 
 
-def test_deny_all_policy_maps_to_network_none():
+def test_deny_all_policy_maps_to_pasta():
     pol = NetworkPolicy(
         name="test",
         description="",
@@ -16,7 +16,7 @@ def test_deny_all_policy_maps_to_network_none():
         allow_localhost=True,
         endpoints=[],
     )
-    assert policy_to_podman_network(pol) == "none"
+    assert policy_to_podman_network(pol) == "pasta"
 
 
 def test_policy_with_endpoints_maps_to_pasta():

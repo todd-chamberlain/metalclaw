@@ -38,13 +38,13 @@ RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || true
 
 # Sandbox user and directories
 RUN useradd -m -s /bin/bash sandbox \
-    && mkdir -p /models /sandbox /etc/metaclaw \
+    && mkdir -p /models /sandbox /etc/metalclaw \
     && chown sandbox:sandbox /sandbox
 
 # Entrypoint and agent scripts
-COPY metaclaw-start.sh /usr/local/bin/metaclaw-start.sh
+COPY metalclaw-start.sh /usr/local/bin/metalclaw-start.sh
 COPY agent-wrapper.sh /usr/local/bin/agent-wrapper.sh
-RUN chmod +x /usr/local/bin/metaclaw-start.sh /usr/local/bin/agent-wrapper.sh
+RUN chmod +x /usr/local/bin/metalclaw-start.sh /usr/local/bin/agent-wrapper.sh
 
 # Config directory is read-only at runtime
 VOLUME ["/models"]
@@ -53,4 +53,4 @@ USER sandbox
 
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/metaclaw-start.sh"]
+ENTRYPOINT ["/usr/local/bin/metalclaw-start.sh"]

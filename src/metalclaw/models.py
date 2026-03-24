@@ -18,7 +18,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from metaclaw.config import MODELS_DIR, ensure_dirs
+from metalclaw.config import MODELS_DIR, ensure_dirs
 
 console = Console()
 

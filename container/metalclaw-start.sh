@@ -7,7 +7,7 @@ CTX_SIZE="${CTX_SIZE:-8192}"
 GPU_LAYERS="${GPU_LAYERS:--1}"
 AGENT_TYPE="${AGENT_TYPE:-none}"
 
-echo "=== Metaclaw Sandbox ==="
+echo "=== Metalclaw Sandbox ==="
 echo "Model: ${MODEL_PATH}"
 echo "Port: ${PORT}"
 echo "Context: ${CTX_SIZE}"

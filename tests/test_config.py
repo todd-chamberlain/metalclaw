@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from metaclaw.config import (
+from metalclaw.config import (
     DEFAULT_CONFIG,
     _deep_merge,
     get,
@@ -33,10 +33,10 @@ def test_deep_merge_does_not_mutate():
 
 
 def test_load_config_returns_defaults(tmp_path):
-    with patch("metaclaw.config.METACLAW_HOME", tmp_path), \
-         patch("metaclaw.config.CONFIG_PATH", tmp_path / "config.yaml"), \
-         patch("metaclaw.config.MODELS_DIR", tmp_path / "models"), \
-         patch("metaclaw.config.STATE_DIR", tmp_path / "state"):
+    with patch("metalclaw.config.METALCLAW_HOME", tmp_path), \
+         patch("metalclaw.config.CONFIG_PATH", tmp_path / "config.yaml"), \
+         patch("metalclaw.config.MODELS_DIR", tmp_path / "models"), \
+         patch("metalclaw.config.STATE_DIR", tmp_path / "state"):
         cfg = load_config()
     assert cfg["version"] == 1
     assert cfg["gpu"]["backend"] == "vulkan"
@@ -44,10 +44,10 @@ def test_load_config_returns_defaults(tmp_path):
 
 def test_save_and_load_roundtrip(tmp_path):
     config_path = tmp_path / "config.yaml"
-    with patch("metaclaw.config.METACLAW_HOME", tmp_path):
-        with patch("metaclaw.config.CONFIG_PATH", config_path):
-            with patch("metaclaw.config.MODELS_DIR", tmp_path / "models"):
-                with patch("metaclaw.config.STATE_DIR", tmp_path / "state"):
+    with patch("metalclaw.config.METALCLAW_HOME", tmp_path):
+        with patch("metalclaw.config.CONFIG_PATH", config_path):
+            with patch("metalclaw.config.MODELS_DIR", tmp_path / "models"):
+                with patch("metalclaw.config.STATE_DIR", tmp_path / "state"):
                     cfg = DEFAULT_CONFIG.copy()
                     cfg["inference"]["model"] = "test-model"
                     save_config(cfg)

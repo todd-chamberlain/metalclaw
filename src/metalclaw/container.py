@@ -8,12 +8,12 @@ from pathlib import Path
 
 from rich.console import Console
 
-from metaclaw.config import load_config
-from metaclaw.policy import NetworkPolicy, policy_to_podman_network
+from metalclaw.config import load_config
+from metalclaw.policy import NetworkPolicy, policy_to_podman_network
 
 console = Console()
 
-IMAGE_NAME = "metaclaw-sandbox"
+IMAGE_NAME = "metalclaw-sandbox"
 CONTAINER_DIR = Path(__file__).parent.parent.parent / "container"
 
 # Ensure podman talks to the libkrun machine, not applehv
@@ -38,7 +38,7 @@ def _podman(*args: str, check: bool = True,
 
 
 def image_exists() -> bool:
-    """Check if the metaclaw sandbox image is built."""
+    """Check if the metalclaw sandbox image is built."""
     try:
         result = _podman("image", "exists", IMAGE_NAME, check=False)
         return result.returncode == 0
@@ -198,7 +198,7 @@ def exec_shell(name: str | None = None) -> None:
 
 
 def get_logs(name: str | None = None, tail: int = 100) -> str:
-    """Get container logs (non-streaming). Use 'metaclaw logs -f' for follow mode."""
+    """Get container logs (non-streaming). Use 'metalclaw logs -f' for follow mode."""
     cfg = load_config()
     name = name or cfg["sandbox"]["name"]
 

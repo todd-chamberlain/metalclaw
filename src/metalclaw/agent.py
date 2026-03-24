@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from rich.console import Console
 
-from metaclaw.config import load_config
-from metaclaw.policy import load_policy, merge_policies, NetworkPolicy
+from metalclaw.config import load_config
+from metalclaw.policy import load_policy, merge_policies, NetworkPolicy
 
 console = Console()
 

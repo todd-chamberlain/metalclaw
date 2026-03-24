@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "metaclaw"
+name = "metalclaw"
 version = "0.1.0"
 description = "Sandboxed GPU-accelerated AI agent runtime for Apple Silicon"
 requires-python = ">=3.11"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-metaclaw = "metaclaw.cli:main"
+metalclaw = "metalclaw.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/metaclaw"]
+packages = ["src/metalclaw"]
