@@ -134,6 +134,28 @@ network_policies:
       - { path: /usr/bin/node }
       - { path: /usr/bin/curl }
 
+  mattermost:
+    name: mattermost
+    endpoints:
+      - host: "*.mattermost.cloud"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/api/v4/**" }
+      - host: "*.mattermost.cloud"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        access: full
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/curl }
+
   github_tools:
     name: github_tools
     endpoints:

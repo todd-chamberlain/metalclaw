@@ -74,7 +74,7 @@ def build_server(force: bool = False) -> bool:
         try:
             subprocess.run(
                 ["git", "clone", "--depth", "1",
-                 "https://github.com/ggerganov/llama.cpp.git",
+                 "https://github.com/ggml-org/llama.cpp.git",
                  str(LLAMA_CPP_DIR)],
                 check=True, capture_output=True, text=True, timeout=120,
             )
@@ -105,7 +105,6 @@ def build_server(force: bool = False) -> bool:
             ["cmake", "-B", str(build_dir),
              "-DGGML_METAL=ON",
              "-DCMAKE_BUILD_TYPE=Release",
-             "-DLLAMA_CURL=OFF",
              "-DBUILD_SHARED_LIBS=OFF"],
             cwd=str(LLAMA_CPP_DIR),
             check=True, capture_output=True, text=True, timeout=120,
@@ -233,7 +232,7 @@ def start_server(
         str(LLAMA_SERVER_BIN),
         "--model", str(model_path),
         "--port", str(port),
-        "--host", "0.0.0.0",
+        "--host", "0.0.0.0",  # nosec B104
         "--ctx-size", str(ctx_size),
         "--n-gpu-layers", str(gpu_layers),
         "--log-disable",

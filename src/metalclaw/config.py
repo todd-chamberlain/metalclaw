@@ -25,13 +25,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "layers": -1,
     },
     "inference": {
-        "model": "qwen2.5-7b",
+        "model": "qwen3-coder-next",
         "port": 8080,
         "context_size": 8192,
     },
     "agent": {
         "type": "none",
         "command": "",
+    },
+    "build": {
+        "base_image": "registry.fedoraproject.org/fedora:42",
+        "extra_pip_packages": [],
+        "extra_system_packages": "",
+        "ca_cert_url": "",
+    },
+    "deploy": {
+        "ca_cert": "",
+        "extra_env": {},
+    },
+    "mattermost": {
+        "url": "",
+        "token": "",
+        "team": "",
+        "trigger": "@metalclaw",
+        "system_prompt": "",
+        "max_history": 20,
     },
     "policy": {
         "base": "default",

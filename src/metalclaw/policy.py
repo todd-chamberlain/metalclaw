@@ -71,7 +71,7 @@ class FilesystemPolicy:
     """Filesystem isolation policy."""
     read_only_root: bool = True
     include_workdir: bool = True
-    read_write: list[str] = field(default_factory=lambda: ["/sandbox", "/tmp"])
+    read_write: list[str] = field(default_factory=lambda: ["/sandbox", "/tmp"])  # nosec B108
     read_only: list[str] = field(default_factory=lambda: [
         "/usr", "/lib", "/etc", "/proc", "/dev/urandom",
     ])
@@ -252,7 +252,7 @@ def load_sandbox_policy(name: str) -> SandboxPolicy:
     fs = FilesystemPolicy(
         read_only_root=fs_data.get("read_only_root", True),
         include_workdir=fs_data.get("include_workdir", True),
-        read_write=fs_data.get("read_write", ["/sandbox", "/tmp"]),
+        read_write=fs_data.get("read_write", ["/sandbox", "/tmp"]),  # nosec B108
         read_only=fs_data.get("read_only", ["/usr", "/lib", "/etc"]),
     )
 

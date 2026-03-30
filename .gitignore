@@ -8,3 +8,5 @@ build/
 *.gguf
 .metalclaw/
 .pytest_cache/
+container/extra-requirements.txt
+container/build-ca-cert.pem

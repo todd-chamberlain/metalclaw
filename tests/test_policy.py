@@ -246,3 +246,24 @@ def test_sandbox_policy_defaults():
     assert sp.filesystem.read_only_root is True
     assert sp.process.run_as_user == "sandbox"
     assert sp.landlock.compatibility == "best_effort"
+
+
+# ---------------------------------------------------------------------------
+# Preset loading
+# ---------------------------------------------------------------------------
+
+def test_mattermost_preset_loads():
+    """Verify mattermost.yaml parses correctly."""
+    from metalclaw.policy import load_policy
+
+    pol = load_policy("mattermost")
+    assert pol is not None
+    assert pol.name == "mattermost"
+    assert "mattermost" in pol.groups
+    group = pol.groups["mattermost"]
+    hosts = {ep.host for ep in group.endpoints}
+    assert "*.mattermost.cloud" in hosts
+    assert "community.mattermost.com" in hosts
+    # Should have at least one CONNECT endpoint (access=full)
+    full_eps = [ep for ep in group.endpoints if ep.access == "full"]
+    assert len(full_eps) >= 1

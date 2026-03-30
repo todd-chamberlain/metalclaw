@@ -21,7 +21,7 @@ if [ "${GPU_BACKEND}" = "metal" ] && [ -n "${INFERENCE_URL}" ]; then
 
     # Wait for host inference to be reachable
     echo "Waiting for host inference server..."
-    for i in $(seq 1 60); do
+    for _i in $(seq 1 60); do
         if curl -sf "${INFERENCE_URL}/health" >/dev/null 2>&1; then
             echo "Host inference server is ready"
             break
@@ -100,7 +100,7 @@ SERVER_PID=$!
 
 # Wait for health check
 echo "Waiting for server to be ready..."
-for i in $(seq 1 60); do
+for _i in $(seq 1 60); do
     if curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1; then
         echo "Server is ready on port ${PORT}"
         break

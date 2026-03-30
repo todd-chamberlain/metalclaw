@@ -1,34 +1,29 @@
-FROM registry.fedoraproject.org/fedora:40
+ARG BASE_IMAGE=registry.fedoraproject.org/fedora:42
+FROM ${BASE_IMAGE}
 
-# System packages: Vulkan drivers (Venus/virtio-gpu), build tools, runtimes
-RUN dnf install -y \
-    mesa-vulkan-drivers \
-    vulkan-loader \
-    vulkan-tools \
-    vulkan-headers \
-    vulkan-loader-devel \
-    glslang \
-    glslc \
-    cmake \
-    gcc-c++ \
-    git \
-    python3 \
-    python3-pip \
-    curl \
-    ca-certificates \
-    nodejs \
-    npm \
-    bash \
-    && dnf clean all
+# ---------------------------------------------------------------------------
+# Build args -- pass via config.build or --build-arg at build time
+# ---------------------------------------------------------------------------
+ARG EXTRA_SYSTEM_PACKAGES=""
+ARG CA_CERT_URL=""
+
+# Core system packages: Vulkan drivers, build tools, runtimes (distro-agnostic)
+COPY install-system-deps.sh /tmp/install-system-deps.sh
+RUN chmod +x /tmp/install-system-deps.sh && /tmp/install-system-deps.sh
+
+# Extra system packages (deployment-configurable, distro-agnostic)
+# Reuses install-system-deps.sh in extra-packages mode (args = packages to install)
+RUN if [ -n "${EXTRA_SYSTEM_PACKAGES}" ]; then \
+        /tmp/install-system-deps.sh ${EXTRA_SYSTEM_PACKAGES}; \
+    fi
 
 # Build llama.cpp with Vulkan + RPC backends (static linking)
-RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp \
     && cd /tmp/llama.cpp \
     && cmake -B build \
         -DGGML_VULKAN=ON \
         -DGGML_RPC=ON \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLLAMA_CURL=OFF \
         -DBUILD_SHARED_LIBS=OFF \
     && cmake --build build --config Release -j$(nproc) --target llama-server \
     && cp build/bin/llama-server /usr/local/bin/ \
@@ -36,12 +31,31 @@ RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cp
 
 # Install OpenClaw (AI agent framework)
 RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || true \
-    && npm install -g @openclaw/cli 2>/dev/null || true
+    && npm install -g openclaw 2>/dev/null || true
 
 # Clone OpenClaw for self-hosted mode
 RUN git clone --depth 1 https://github.com/openclaw/openclaw.git /opt/openclaw \
     && cd /opt/openclaw \
     && npm install --production 2>/dev/null || true
+
+# Core Python deps for Mattermost bot
+RUN pip3 install --no-cache-dir httpx mattermostdriver
+
+# Extra pip packages (deployment-configurable via build.extra_pip_packages)
+# Generated as a standard requirements file by build_image() -- no shell
+# expansion, so version specifiers like websockets<14 work correctly.
+COPY extra-requirements.txt /tmp/extra-requirements.txt
+RUN if [ -s /tmp/extra-requirements.txt ]; then \
+        pip3 install --no-cache-dir -r /tmp/extra-requirements.txt; \
+    fi
+
+# CA certificate (deployment-configurable)
+# Prefers local cert from deploy.ca_cert (copied into build context by
+# build_image()).  Falls back to CA_CERT_URL for CI/CD environments.
+# Distro-agnostic: detects RHEL/Fedora vs Debian/Ubuntu/Alpine trust stores.
+COPY build-ca-cert.pem /tmp/build-ca-cert.pem
+COPY install-ca-cert.sh /tmp/install-ca-cert.sh
+RUN chmod +x /tmp/install-ca-cert.sh && /tmp/install-ca-cert.sh
 
 # Sandbox user and directories
 RUN useradd -m -s /bin/bash sandbox \
@@ -51,7 +65,8 @@ RUN useradd -m -s /bin/bash sandbox \
 # Entrypoint and agent scripts
 COPY metalclaw-start.sh /usr/local/bin/metalclaw-start.sh
 COPY agent-wrapper.sh /usr/local/bin/agent-wrapper.sh
-RUN chmod +x /usr/local/bin/metalclaw-start.sh /usr/local/bin/agent-wrapper.sh
+COPY mattermost-bot.py /usr/local/bin/mattermost-bot.py
+RUN chmod +x /usr/local/bin/metalclaw-start.sh /usr/local/bin/agent-wrapper.sh /usr/local/bin/mattermost-bot.py
 
 # Config directory is read-only at runtime
 VOLUME ["/models"]

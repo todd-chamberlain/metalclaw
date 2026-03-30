@@ -52,7 +52,7 @@ def onboard(model: str | None, skip_download: bool) -> None:
     # Save GPU-informed defaults to config
     cfg = config.load_config()
     if gpu_info.unified_memory_gb >= 64:
-        cfg["inference"]["model"] = model or "qwen2.5-72b"
+        cfg["inference"]["model"] = model or "qwen3-coder-next"
         cfg["machine"]["memory"] = min(gpu_info.unified_memory_gb * 1024, 61440)
     else:
         cfg["inference"]["model"] = model or "qwen2.5-7b"
@@ -120,7 +120,7 @@ def onboard(model: str | None, skip_download: bool) -> None:
 
 @main.command()
 @click.option("--model", default=None, help="Override model to use")
-@click.option("--agent", default=None, type=click.Choice(["none", "openclaw", "claude-code", "custom"]),
+@click.option("--agent", default=None, type=click.Choice(["none", "openclaw", "claude-code", "mattermost", "custom"]),
               help="Agent type to run inside sandbox")
 @click.option("--presets", default=None, help="Comma-separated policy presets")
 @click.option("--gpu", "gpu_backend", default=None,

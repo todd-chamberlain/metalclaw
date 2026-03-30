@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -56,23 +58,193 @@ def image_exists() -> bool:
         return False
 
 
+def _resolve_pip_packages(raw: str | list) -> list[str]:
+    """Normalize extra_pip_packages config to a list of requirement lines.
+
+    Accepts either a YAML list or a legacy space-separated string.
+    """
+    if isinstance(raw, list):
+        return [s.strip() for s in raw if s and str(s).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return raw.split()
+    return []
+
+
+def _validate_base_image(value: str) -> str | None:
+    """Validate base_image format. Returns error message or None if valid."""
+    if not value:
+        return "base_image cannot be empty"
+    # OCI image references: registry/path:tag or registry/path@digest
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-_/:@]+$', value):
+        return f"base_image contains invalid characters: {value}"
+    return None
+
+
+def _validate_system_packages(value: str) -> str | None:
+    """Validate extra_system_packages for safe characters. Returns error or None."""
+    if not value:
+        return None
+    # Package names: alphanumeric, dash, underscore, dot, plus, space
+    if not re.match(r'^[a-zA-Z0-9.\-_+ ]+$', value):
+        return f"extra_system_packages contains invalid characters: {value}"
+    return None
+
+
+def _validate_url_scheme(value: str) -> str | None:
+    """Validate URL uses https:// only. Returns error or None.
+
+    CA certificates must be fetched over HTTPS to prevent MITM injection.
+    """
+    if not value:
+        return None
+    if not value.startswith("https://"):
+        return f"ca_cert_url must use https:// (got: {value})"
+    return None
+
+
+# Env var keys that could enable privilege escalation or code injection
+# inside the container if overridden by an attacker with config write access.
+_BLOCKED_ENV_KEYS = frozenset({
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "LD_DEBUG",
+    "PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
+    "NODE_OPTIONS", "NODE_PATH",
+    "BASH_ENV", "ENV", "CDPATH", "GLOBIGNORE",
+    "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+})
+
+
+def _validate_env_var(key: str, value: str) -> str | None:
+    """Validate a deploy.extra_env entry. Returns error or None."""
+    if key in _BLOCKED_ENV_KEYS:
+        return (
+            f"deploy.extra_env key '{key}' is blocked (security-sensitive). "
+            "Remove it or use a container-safe alternative."
+        )
+    if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', key):
+        return f"deploy.extra_env key '{key}' is not a valid env var name"
+    return None
+
+
+def _path_has_symlink(p: Path) -> bool:
+    """Check if any component of a path is a symlink."""
+    for parent in [p, *p.parents]:
+        if parent.is_symlink():
+            return True
+        if parent == parent.parent:
+            break
+    return False
+
+
+def _validate_pip_requirement(line: str) -> str | None:
+    """Validate a single pip requirement line. Returns error or None."""
+    lowered = line.lower().strip()
+    if lowered.startswith(("file:", "git+", "hg+", "svn+", "bzr+")):
+        return f"extra_pip_packages entry uses disallowed VCS/file source: {line}"
+    if "--index-url" in lowered or "--extra-index-url" in lowered:
+        return f"extra_pip_packages entry contains disallowed pip option: {line}"
+    if "--find-links" in lowered or "--trusted-host" in lowered:
+        return f"extra_pip_packages entry contains disallowed pip option: {line}"
+    return None
+
+
 def build_image() -> bool:
-    """Build the sandbox container image from Containerfile."""
+    """Build the sandbox container image from Containerfile.
+
+    Reads build.* config keys:
+        build.base_image             -> BASE_IMAGE build arg
+        build.extra_pip_packages     -> extra-requirements.txt (COPY'd into image)
+        build.extra_system_packages  -> EXTRA_SYSTEM_PACKAGES build arg
+        build.ca_cert_url            -> CA_CERT_URL build arg (fallback)
+        deploy.ca_cert               -> build-ca-cert.pem (COPY'd, preferred)
+    """
     containerfile = CONTAINER_DIR / "Containerfile"
     if not containerfile.exists():
         console.print(f"[red]Containerfile not found at {containerfile}[/red]")
         return False
 
+    cfg = load_config()
+    build_cfg = cfg.get("build", {})
+
+    # ── Validate build inputs ────────────────────────────────────
+    base_image = build_cfg.get("base_image", "registry.fedoraproject.org/fedora:42")
+    err = _validate_base_image(base_image)
+    if err:
+        console.print(f"[red]{err}[/red]")
+        return False
+
+    extra_sys = build_cfg.get("extra_system_packages", "")
+    err = _validate_system_packages(extra_sys)
+    if err:
+        console.print(f"[red]{err}[/red]")
+        return False
+
+    ca_cert_url = build_cfg.get("ca_cert_url", "")
+    err = _validate_url_scheme(ca_cert_url)
+    if err:
+        console.print(f"[red]{err}[/red]")
+        return False
+
+    # ── Generate requirements file in build context ──────────────
+    # Standard pip requirements file — no shell expansion, no quoting issues.
+    pip_packages = _resolve_pip_packages(build_cfg.get("extra_pip_packages", []))
+    for pkg in pip_packages:
+        err = _validate_pip_requirement(pkg)
+        if err:
+            console.print(f"[red]{err}[/red]")
+            return False
+    req_file = CONTAINER_DIR / "extra-requirements.txt"
+    req_file.write_text("\n".join(pip_packages) + "\n" if pip_packages else "")
+
+    # ── CA cert: prefer local file over URL fetch ────────────────
+    # If deploy.ca_cert points to a local file, copy it into the build
+    # context so the Containerfile can COPY it directly.  This avoids
+    # requiring network access to a corporate PKI server during build.
+    # Falls back to CA_CERT_URL ARG for CI/CD environments.
+    deploy_cfg = cfg.get("deploy", {})
+    ca_cert_file = CONTAINER_DIR / "build-ca-cert.pem"
+    local_ca = deploy_cfg.get("ca_cert", "")
+    if local_ca:
+        local_ca_expanded = Path(local_ca).expanduser()
+        if _path_has_symlink(local_ca_expanded):
+            console.print(f"[yellow]Warning: CA cert path contains a symlink, rejecting: {local_ca}[/yellow]")
+            ca_cert_file.write_text("")
+        elif local_ca_expanded.resolve().is_file():
+            shutil.copy2(local_ca_expanded.resolve(), ca_cert_file)
+        else:
+            ca_cert_file.write_text("")
+    else:
+        ca_cert_file.write_text("")
+
+    cmd = [
+        "build",
+        "-t", IMAGE_NAME,
+        "-f", str(containerfile),
+        "--build-arg", f"BASE_IMAGE={base_image}",
+    ]
+
+    # Build args (system packages and CA cert URL fallback)
+    if extra_sys:
+        cmd.extend(["--build-arg", f"EXTRA_SYSTEM_PACKAGES={extra_sys}"])
+    if ca_cert_url and not ca_cert_file.stat().st_size:
+        # Only use URL if no local cert was copied
+        cmd.extend(["--build-arg", f"CA_CERT_URL={ca_cert_url}"])
+
+    cmd.append(str(CONTAINER_DIR))
+
     console.print("Building container image (this may take several minutes)...")
+    console.print(f"  Base image: [cyan]{base_image}[/cyan]")
+    if pip_packages:
+        console.print(f"  Extra pip: [cyan]{', '.join(pip_packages)}[/cyan]")
+    if extra_sys:
+        console.print(f"  Extra sys: [cyan]{extra_sys}[/cyan]")
+    if ca_cert_file.stat().st_size:
+        console.print(f"  CA cert:   [cyan]{local_ca} (local)[/cyan]")
+    elif ca_cert_url:
+        console.print(f"  CA cert:   [cyan]{ca_cert_url} (URL)[/cyan]")
+
     try:
-        result = _podman(
-            "build",
-            "-t", IMAGE_NAME,
-            "-f", str(containerfile),
-            str(CONTAINER_DIR),
-            timeout=1800,
-            check=False,
-        )
+        result = _podman(*cmd, timeout=1800, check=False)
         if result.returncode != 0:
             console.print(f"[red]Build failed:\n{result.stderr}[/red]")
             return False
@@ -81,6 +253,10 @@ def build_image() -> bool:
     except RuntimeError as e:
         console.print(f"[red]Build failed: {e}[/red]")
         return False
+    finally:
+        # Clean up generated files from source tree
+        req_file.unlink(missing_ok=True)
+        ca_cert_file.unlink(missing_ok=True)
 
 
 def container_exists(name: str | None = None) -> bool:
@@ -175,7 +351,7 @@ def start_container(
     read_only_root = fs_policy.read_only_root if fs_policy else True
     if read_only_root:
         cmd.append("--read-only")
-        cmd.extend(["--tmpfs", "/tmp:rw,nosuid,nodev,size=1g"])
+        cmd.extend(["--tmpfs", "/tmp:rw,nosuid,nodev,size=1g"])  # nosec B108
         cmd.extend(["--tmpfs", "/sandbox:rw,nosuid,nodev,size=10g"])
 
     # Process isolation -- always default to sandbox user
@@ -200,6 +376,50 @@ def start_container(
             "-e", f"GPU_LAYERS={gpu_layers}",
         ])
 
+    # ── Deploy-level: CA cert mount (any agent type) ─────────────
+    deploy = cfg.get("deploy", {})
+    ca_cert = deploy.get("ca_cert", "")
+    if ca_cert:
+        ca_expanded = Path(ca_cert).expanduser()
+        if _path_has_symlink(ca_expanded):
+            console.print(f"[yellow]Warning: CA cert path contains a symlink, rejecting: {ca_cert}[/yellow]")
+        elif ca_expanded.resolve().is_file():
+            ca_path = ca_expanded.resolve()
+            container_cert = "/etc/metalclaw/ca-cert.pem"
+            cmd.extend(["-v", f"{ca_path}:{container_cert}:ro"])
+            cmd.extend(["-e", f"SSL_CERT_FILE={container_cert}"])
+            cmd.extend(["-e", f"REQUESTS_CA_BUNDLE={container_cert}"])
+            # Agent-specific cert env vars
+            if agent_type == "mattermost":
+                cmd.extend(["-e", f"MATTERMOST_CA_CERT={container_cert}"])
+        else:
+            console.print(f"[yellow]Warning: CA cert not found: {ca_cert}[/yellow]")
+
+    # ── Deploy-level: extra env vars (any agent type) ──────────
+    extra_env = deploy.get("extra_env", {})
+    if isinstance(extra_env, dict):
+        for k, v in extra_env.items():
+            err = _validate_env_var(k, v)
+            if err:
+                console.print(f"[red]{err}[/red]")
+                return False
+            cmd.extend(["-e", f"{k}={v}"])
+
+    # ── Mattermost agent: inject config env vars ───────────────
+    if agent_type == "mattermost":
+        mm = cfg.get("mattermost", {})
+        mm_env = {
+            "MATTERMOST_URL": mm.get("url", ""),
+            "MATTERMOST_TOKEN": mm.get("token", ""),
+            "MATTERMOST_TEAM": mm.get("team", ""),
+            "MATTERMOST_TRIGGER": mm.get("trigger", "@metalclaw"),
+            "MATTERMOST_SYSTEM_PROMPT": mm.get("system_prompt", ""),
+            "MATTERMOST_MAX_HISTORY": str(mm.get("max_history", 20)),
+        }
+        for k, v in mm_env.items():
+            if v:
+                cmd.extend(["-e", f"{k}={v}"])
+
     # Agent command -- validate before passing to container
     if agent_command:
         _validate_agent_command(agent_command)
@@ -220,13 +440,13 @@ def start_container(
 
 
 def _validate_agent_command(command: str) -> None:
-    """Validate agent command for shell injection risks."""
-    dangerous = {"$(", "`", "&&", "||", ";", "|", ">", "<", "\n"}
+    """Validate agent command for shell injection and globbing risks."""
+    dangerous = {"$(", "`", "&&", "||", ";", "|", ">", "<", "\n", "*", "?"}
     for pattern in dangerous:
         if pattern in command:
             raise ValueError(
-                f"Agent command contains disallowed shell metacharacter: {pattern!r}. "
-                "Use a simple command without shell operators."
+                f"Agent command contains disallowed character: {pattern!r}. "
+                "Use a simple command without shell operators or glob patterns."
             )
 
 

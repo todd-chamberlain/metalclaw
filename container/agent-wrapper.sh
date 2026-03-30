@@ -37,6 +37,11 @@ case "${AGENT_TYPE}" in
             --model "openai/local" \
             --api-base "${INFERENCE_URL}/v1"
         ;;
+    mattermost)
+        echo "Starting Mattermost bot bridge..."
+        echo "Inference: ${INFERENCE_URL}/v1"
+        exec python3 /usr/local/bin/mattermost-bot.py
+        ;;
     custom)
         if [ -z "${AGENT_COMMAND}" ]; then
             echo "ERROR: AGENT_COMMAND not set for custom agent type"
@@ -51,7 +56,9 @@ case "${AGENT_TYPE}" in
             exec /bin/bash
         fi
         echo "Starting custom agent: ${AGENT_COMMAND}"
-        # Use 'exec' with word splitting on the validated command (no bash -c)
+        # Disable globbing to prevent * and ? expansion, then word-split the
+        # validated command into argv for exec (no bash -c, no shell eval).
+        set -f
         # shellcheck disable=SC2086
         exec ${AGENT_COMMAND}
         ;;

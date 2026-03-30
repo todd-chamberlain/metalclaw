@@ -1,0 +1,39 @@
+preset:
+  name: mattermost
+  description: Mattermost bot API and WebSocket event stream
+
+network_policies:
+  mattermost:
+    name: mattermost
+    endpoints:
+      - host: "*.mattermost.cloud"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/api/v4/**" }
+      - host: "*.mattermost.cloud"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        access: full
+      - host: community.mattermost.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/api/v4/**" }
+      - host: community.mattermost.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        access: full
+    binaries:
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3* }
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/bash }

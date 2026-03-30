@@ -65,7 +65,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 64,
         "context_window": 32768,
         "description": "Qwen 3 coding model with thinking/non-thinking modes",
-        "expected_sha256": "c3d5e7f9a1b2c4d6e8f1a3b5c7d9e2f4a6b8c1d3e5f7a9b2c4d6e8f1a3b5c7d9",
+        "expected_sha256": "9e6032d2f3b50a60f17ce8bf5a1d85c71af9b53b89c7978020ae7c660f29b090",
     },
     "deepseek-r1-70b": {
         "name": "DeepSeek R1 70B",
