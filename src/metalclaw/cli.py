@@ -120,7 +120,7 @@ def onboard(model: str | None, skip_download: bool) -> None:
 
 @main.command()
 @click.option("--model", default=None, help="Override model to use")
-@click.option("--agent", default=None, type=click.Choice(["none", "claude-code", "custom"]),
+@click.option("--agent", default=None, type=click.Choice(["none", "openclaw", "claude-code", "custom"]),
               help="Agent type to run inside sandbox")
 @click.option("--presets", default=None, help="Comma-separated policy presets")
 @click.option("--gpu", "gpu_backend", default=None,
@@ -155,13 +155,10 @@ def run(model: str | None, agent: str | None, presets: str | None,
         console.print(f"[red]Model '{model_key}' not found. Run: metalclaw model pull {model_key}[/red]")
         sys.exit(1)
 
-    # Build policy
-    base_pol = policy.load_policy(cfg["policy"]["base"])
-    if not base_pol:
-        console.print("[red]Could not load base policy[/red]")
-        sys.exit(1)
+    # Build full sandbox policy (network + filesystem + process + landlock)
+    sandbox_pol = policy.load_sandbox_policy(cfg["policy"]["base"])
 
-    # Apply presets from config and CLI
+    # Apply presets from config and CLI to the network policy
     preset_names = list(cfg["policy"].get("presets", []))
     if presets:
         preset_names.extend(presets.split(","))
@@ -174,15 +171,20 @@ def run(model: str | None, agent: str | None, presets: str | None,
 
     # Agent config + its required presets
     agent_cfg = agent_mod.get_agent_config(agent_type, cfg["agent"]["command"])
-    final_policy = agent_mod.resolve_policy_with_agent(base_pol, agent_cfg)
+    final_net_policy = agent_mod.resolve_policy_with_agent(sandbox_pol.network, agent_cfg)
     if preset_policies:
-        final_policy = policy.merge_policies(final_policy, *preset_policies)
+        final_net_policy = policy.merge_policies(final_net_policy, *preset_policies)
+
+    # Update sandbox policy with merged network policy
+    sandbox_pol.network = final_net_policy
 
     console.print("[bold]Configuration[/bold]")
     console.print(f"  Model: [cyan]{model_key}[/cyan] ({model_path})")
     console.print(f"  GPU: [cyan]{backend}[/cyan]")
     console.print(f"  Agent: [cyan]{agent_cfg.agent_type}[/cyan]")
-    policy.print_policy(final_policy)
+    console.print(f"  User: [cyan]{sandbox_pol.process.run_as_user}[/cyan]")
+    console.print(f"  Read-only root: [cyan]{sandbox_pol.filesystem.read_only_root}[/cyan]")
+    policy.print_policy(final_net_policy)
 
     # Ensure container image exists
     if not container.image_exists():
@@ -219,7 +221,7 @@ def run(model: str | None, agent: str | None, presets: str | None,
     console.print("[bold]Starting sandbox container[/bold]")
     if not container.start_container(
         model_path=model_path,
-        policy=final_policy,
+        sandbox_policy=sandbox_pol,
         agent_type=agent_cfg.agent_type,
         agent_command=agent_cfg.command,
         gpu_backend=backend,
@@ -341,11 +343,14 @@ def connect() -> None:
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.option("--tail", default=100, help="Number of lines to show")
+@click.option("--tail", default=100, help="Number of lines to show (max 10000)")
 @click.option("-f", "--follow", is_flag=True, help="Follow log output")
 def logs(tail: int, follow: bool) -> None:
     """Show container logs."""
     from metalclaw import container
+
+    # Cap tail value
+    tail = min(tail, container.MAX_LOG_TAIL)
 
     if follow:
         import os

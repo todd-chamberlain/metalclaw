@@ -1,33 +1,34 @@
 preset:
-  name: github
-  description: Git and GitHub CLI access
+  name: jira
+  description: Atlassian Jira and Confluence Cloud access
 
 network_policies:
-  github:
-    name: github
+  jira:
+    name: jira
     endpoints:
-      - host: github.com
+      - host: "*.atlassian.net"
         port: 443
         protocol: rest
         enforcement: enforce
         tls: terminate
         rules:
           - allow: { method: "*", path: "/**" }
-      - host: api.github.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        tls: terminate
-        rules:
-          - allow: { method: "*", path: "/**" }
-      - host: "*.githubusercontent.com"
+      - host: auth.atlassian.com
         port: 443
         protocol: rest
         enforcement: enforce
         tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+      - host: api.atlassian.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/**" }
     binaries:
-      - { path: /usr/bin/git }
-      - { path: /usr/bin/gh }
       - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }

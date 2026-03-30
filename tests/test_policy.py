@@ -1,101 +1,212 @@
-"""Tests for policy module."""
+"""Tests for policy module (NemoClaw-compatible named groups schema)."""
+
+import pytest
 
 from metalclaw.policy import (
+    BinarySpec,
     EndpointRule,
     FilesystemPolicy,
+    HttpRule,
+    LandlockPolicy,
     NetworkPolicy,
+    PolicyGroup,
     ProcessPolicy,
     SandboxPolicy,
     merge_policies,
-    policy_to_podman_network,
+    policy_to_podman_args,
 )
 
 
-def test_deny_all_policy_maps_to_pasta():
+# ---------------------------------------------------------------------------
+# Network mode / podman args
+# ---------------------------------------------------------------------------
+
+def test_deny_all_policy_maps_to_pasta_with_dns_none():
+    """Deny-all with no groups should block DNS forwarding."""
     pol = NetworkPolicy(
-        name="test",
-        description="",
-        default_action="deny",
-        allow_localhost=True,
-        endpoints=[],
+        name="test", description="", default_action="deny",
+        allow_localhost=True, groups={},
     )
-    assert policy_to_podman_network(pol) == "pasta"
+    args = policy_to_podman_args(pol)
+    assert "--network=pasta" in args
+    assert "--dns=none" in args
 
 
-def test_policy_with_endpoints_maps_to_pasta():
+def test_policy_with_groups_maps_to_pasta_without_dns_block():
+    """Policy with endpoint groups should allow DNS (for endpoint resolution)."""
     pol = NetworkPolicy(
-        name="test",
-        description="",
-        default_action="deny",
+        name="test", description="", default_action="deny",
         allow_localhost=True,
-        endpoints=[
-            EndpointRule(host="github.com", ports=[443]),
-        ],
+        groups={
+            "github": PolicyGroup(
+                name="github",
+                endpoints=[EndpointRule(host="github.com", port=443)],
+                binaries=[BinarySpec(path="/usr/bin/git")],
+            ),
+        },
     )
-    assert policy_to_podman_network(pol) == "pasta"
+    args = policy_to_podman_args(pol)
+    assert "--network=pasta" in args
+    assert "--dns=none" not in args
 
+
+# ---------------------------------------------------------------------------
+# Merging
+# ---------------------------------------------------------------------------
 
 def test_merge_policies():
-    base = NetworkPolicy(
-        name="base",
-        description="",
-        default_action="deny",
-        allow_localhost=True,
-        endpoints=[],
-    )
+    base = NetworkPolicy(name="base", description="", groups={})
     preset = NetworkPolicy(
-        name="github",
-        description="",
-        default_action="deny",
-        allow_localhost=True,
-        endpoints=[
-            EndpointRule(host="github.com", ports=[443]),
-        ],
+        name="github", description="",
+        groups={
+            "github": PolicyGroup(
+                name="github",
+                endpoints=[EndpointRule(host="github.com")],
+                binaries=[BinarySpec(path="/usr/bin/git")],
+            ),
+        },
     )
     merged = merge_policies(base, preset)
-    assert len(merged.endpoints) == 1
-    assert merged.endpoints[0].host == "github.com"
+    assert "github" in merged.groups
+    assert merged.groups["github"].endpoints[0].host == "github.com"
     assert merged.default_action == "deny"
 
 
 def test_merge_multiple_presets():
-    base = NetworkPolicy("base", "", "deny", True, [])
-    p1 = NetworkPolicy("a", "", "deny", True, [EndpointRule("a.com")])
-    p2 = NetworkPolicy("b", "", "deny", True, [EndpointRule("b.com")])
+    base = NetworkPolicy(name="base", description="", groups={})
+    p1 = NetworkPolicy(
+        name="a", description="",
+        groups={"a": PolicyGroup(name="a", endpoints=[EndpointRule(host="a.com")])},
+    )
+    p2 = NetworkPolicy(
+        name="b", description="",
+        groups={"b": PolicyGroup(name="b", endpoints=[EndpointRule(host="b.com")])},
+    )
     merged = merge_policies(base, p1, p2)
-    assert len(merged.endpoints) == 2
-    hosts = {ep.host for ep in merged.endpoints}
-    assert hosts == {"a.com", "b.com"}
+    assert len(merged.groups) == 2
+    assert set(merged.groups.keys()) == {"a", "b"}
 
+
+def test_merge_deduplicates_by_group_name():
+    """When merging groups with the same name, endpoints combine."""
+    base = NetworkPolicy(
+        name="base", description="",
+        groups={
+            "shared": PolicyGroup(
+                name="shared",
+                endpoints=[EndpointRule(host="a.com")],
+                binaries=[BinarySpec(path="/usr/bin/curl")],
+            ),
+        },
+    )
+    preset = NetworkPolicy(
+        name="preset", description="",
+        groups={
+            "shared": PolicyGroup(
+                name="shared",
+                endpoints=[EndpointRule(host="b.com")],
+                binaries=[BinarySpec(path="/usr/bin/wget")],
+            ),
+        },
+    )
+    merged = merge_policies(base, preset)
+    assert len(merged.groups) == 1
+    assert len(merged.groups["shared"].endpoints) == 2
+    hosts = {ep.host for ep in merged.groups["shared"].endpoints}
+    assert hosts == {"a.com", "b.com"}
+    # Binaries from both should be present
+    bin_paths = {b.path for b in merged.groups["shared"].binaries}
+    assert bin_paths == {"/usr/bin/curl", "/usr/bin/wget"}
+
+
+# ---------------------------------------------------------------------------
+# EndpointRule (NemoClaw fields)
+# ---------------------------------------------------------------------------
 
 def test_endpoint_rule_nemoclaw_fields():
-    """Endpoint rules support NemoClaw-compatible binary/access/tls fields."""
+    """Endpoint rules support NemoClaw-compatible enforcement/tls/rules fields."""
     ep = EndpointRule(
         host="api.github.com",
-        ports=[443],
-        binaries=["/usr/bin/git", "/usr/bin/curl"],
-        access="read-only",
+        port=443,
+        protocol="rest",
+        enforcement="enforce",
         tls="terminate",
+        rules=[
+            HttpRule(method="GET", path="/**"),
+            HttpRule(method="POST", path="/repos/**"),
+        ],
     )
-    assert ep.binaries == ["/usr/bin/git", "/usr/bin/curl"]
-    assert ep.access == "read-only"
+    assert ep.enforcement == "enforce"
     assert ep.tls == "terminate"
+    assert len(ep.rules) == 2
+    assert ep.rules[0].method == "GET"
+    assert ep.rules[1].path == "/repos/**"
+
+
+def test_endpoint_rule_connect_tunnel():
+    """access='full' enables CONNECT tunnel for WebSocket endpoints."""
+    ep = EndpointRule(
+        host="gateway.discord.gg",
+        port=443,
+        access="full",
+    )
+    assert ep.access == "full"
 
 
 def test_endpoint_rule_defaults():
     """Default values for NemoClaw fields."""
     ep = EndpointRule(host="example.com")
-    assert ep.binaries == []
-    assert ep.access == "full"
-    assert ep.tls == "passthrough"
-    assert ep.ports == [443]
-    assert ep.protocol == "tcp"
-    assert ep.direction == "outbound"
+    assert ep.port == 443
+    assert ep.protocol == "rest"
+    assert ep.enforcement == "enforce"
+    assert ep.tls == "terminate"
+    assert ep.access == ""
+    assert ep.rules == []
 
+
+def test_http_rule_defaults():
+    rule = HttpRule()
+    assert rule.method == "*"
+    assert rule.path == "/**"
+
+
+# ---------------------------------------------------------------------------
+# Binary spec
+# ---------------------------------------------------------------------------
+
+def test_binary_spec():
+    b = BinarySpec(path="/usr/bin/git")
+    assert b.path == "/usr/bin/git"
+
+
+def test_binary_spec_glob():
+    b = BinarySpec(path="/usr/bin/python3*")
+    assert "*" in b.path
+
+
+# ---------------------------------------------------------------------------
+# PolicyGroup
+# ---------------------------------------------------------------------------
+
+def test_policy_group():
+    g = PolicyGroup(
+        name="github",
+        endpoints=[EndpointRule(host="github.com")],
+        binaries=[BinarySpec(path="/usr/bin/git")],
+    )
+    assert g.name == "github"
+    assert len(g.endpoints) == 1
+    assert len(g.binaries) == 1
+
+
+# ---------------------------------------------------------------------------
+# Filesystem / Process / Landlock
+# ---------------------------------------------------------------------------
 
 def test_filesystem_policy_defaults():
     fs = FilesystemPolicy()
     assert fs.read_only_root is True
+    assert fs.include_workdir is True
     assert "/sandbox" in fs.read_write
     assert "/tmp" in fs.read_write
 
@@ -106,12 +217,32 @@ def test_process_policy_defaults():
     assert proc.run_as_group == "sandbox"
 
 
+def test_landlock_policy_defaults():
+    ll = LandlockPolicy()
+    assert ll.compatibility == "best_effort"
+
+
+# ---------------------------------------------------------------------------
+# SandboxPolicy composition
+# ---------------------------------------------------------------------------
+
 def test_sandbox_policy_composition():
     sp = SandboxPolicy(
-        network=NetworkPolicy("test", "", "deny", True, []),
+        network=NetworkPolicy("test", "", groups={}),
         filesystem=FilesystemPolicy(read_only_root=True),
         process=ProcessPolicy(run_as_user="agent"),
+        landlock=LandlockPolicy(compatibility="strict"),
     )
     assert sp.network.default_action == "deny"
     assert sp.filesystem.read_only_root is True
     assert sp.process.run_as_user == "agent"
+    assert sp.landlock.compatibility == "strict"
+
+
+def test_sandbox_policy_defaults():
+    sp = SandboxPolicy()
+    assert sp.version == 1
+    assert sp.network.name == "default"
+    assert sp.filesystem.read_only_root is True
+    assert sp.process.run_as_user == "sandbox"
+    assert sp.landlock.compatibility == "best_effort"

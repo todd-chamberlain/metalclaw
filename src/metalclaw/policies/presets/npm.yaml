@@ -1,19 +1,27 @@
-name: npm
-description: npm registry access for package installation
+preset:
+  name: npm
+  description: npm registry access for package installation
 
 network_policies:
-  default_action: deny
-  allow_localhost: true
-  allowed_endpoints:
-    - host: registry.npmjs.org
-      ports: [443]
-      protocol: tcp
-      direction: outbound
-      binaries: [/usr/bin/npm, /usr/bin/npx]
-      access: read-only
-    - host: "*.npmjs.com"
-      ports: [443]
-      protocol: tcp
-      direction: outbound
-      binaries: [/usr/bin/npm, /usr/bin/npx]
-      access: read-only
+  npm:
+    name: npm
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+      - host: "*.npmjs.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+    binaries:
+      - { path: /usr/bin/npm }
+      - { path: /usr/bin/npx }
+      - { path: /usr/local/bin/npm }
+      - { path: /usr/local/bin/npx }

@@ -11,7 +11,7 @@ from metalclaw.policy import load_policy, merge_policies, NetworkPolicy
 
 console = Console()
 
-AGENT_TYPES = ("none", "claude-code", "custom")
+AGENT_TYPES = ("none", "openclaw", "claude-code", "custom")
 
 
 @dataclass
@@ -37,7 +37,13 @@ def get_agent_config(agent_type: str | None = None,
 
     required_presets: list[str] = []
 
-    if agent_type == "claude-code":
+    if agent_type == "openclaw":
+        # OpenClaw needs outbound access for its channel adapters
+        required_presets.append("openclaw")
+        if not command:
+            command = ""  # handled by agent-wrapper.sh
+
+    elif agent_type == "claude-code":
         required_presets.append("anthropic")
         if not command:
             command = "claude --model openai/local --api-base http://localhost:8080/v1"

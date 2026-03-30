@@ -1,20 +1,25 @@
-name: anthropic
-description: Anthropic API access for Claude Code agent
+preset:
+  name: anthropic
+  description: Anthropic API access for Claude Code agent
 
 network_policies:
-  default_action: deny
-  allow_localhost: true
-  allowed_endpoints:
-    - host: api.anthropic.com
-      ports: [443]
-      protocol: tcp
-      direction: outbound
-      binaries: [/usr/local/bin/claude]
-      access: full
-      tls: terminate
-    - host: "*.anthropic.com"
-      ports: [443]
-      protocol: tcp
-      direction: outbound
-      binaries: [/usr/local/bin/claude]
-      access: full
+  anthropic:
+    name: anthropic
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/**" }
+      - host: "*.anthropic.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: "*", path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/curl }

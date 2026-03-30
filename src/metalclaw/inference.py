@@ -12,15 +12,32 @@ from metalclaw.config import load_config
 
 console = Console()
 
+# Absolute maximum time to wait for inference server, regardless of retries
+MAX_HEALTH_CHECK_SECONDS = 300  # 5 minutes
+
 
 def health_check(port: int | None = None, retries: int = 30,
                  interval: float = 2.0) -> bool:
-    """Poll /health until llama-server is ready."""
+    """Poll /health until llama-server is ready.
+
+    Uses both retry count AND absolute wall-clock timeout to prevent
+    infinite loops on perpetual 'loading model' responses.
+    """
     cfg = load_config()
     port = port or cfg["inference"]["port"]
     url = f"http://127.0.0.1:{port}/health"
 
+    start = time.monotonic()
+
     for i in range(retries):
+        # Absolute timeout guard
+        elapsed = time.monotonic() - start
+        if elapsed > MAX_HEALTH_CHECK_SECONDS:
+            console.print(
+                f"[red]  Health check timed out after {elapsed:.0f}s[/red]"
+            )
+            return False
+
         try:
             resp = httpx.get(url, timeout=5.0)
             if resp.status_code == 200:
@@ -31,7 +48,9 @@ def health_check(port: int | None = None, retries: int = 30,
                     return True
                 elif status == "loading model":
                     if i % 5 == 0:
-                        console.print("  Loading model...")
+                        console.print(
+                            f"  Loading model... ({elapsed:.0f}s elapsed)"
+                        )
                 else:
                     console.print(f"  Server status: {status}")
         except (httpx.HTTPError, json.JSONDecodeError):

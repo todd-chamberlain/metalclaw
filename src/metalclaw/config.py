@@ -61,6 +61,11 @@ def ensure_dirs() -> None:
     """Create metalclaw home directories if they don't exist."""
     for d in (METALCLAW_HOME, MODELS_DIR, STATE_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    # Restrict home dir permissions (user-only)
+    try:
+        METALCLAW_HOME.chmod(0o700)
+    except OSError:
+        pass
 
 
 def load_config() -> dict[str, Any]:
@@ -79,10 +84,15 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(cfg: dict[str, Any]) -> None:
-    """Write config to disk."""
+    """Write config to disk with restrictive permissions."""
     ensure_dirs()
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+    # Config may contain agent commands or secrets -- restrict to owner only
+    try:
+        CONFIG_PATH.chmod(0o600)
+    except OSError:
+        pass
 
 
 def get(key: str, cfg: dict[str, Any] | None = None) -> Any:

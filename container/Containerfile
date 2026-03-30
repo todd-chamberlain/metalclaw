@@ -22,8 +22,6 @@ RUN dnf install -y \
     && dnf clean all
 
 # Build llama.cpp with Vulkan + RPC backends (static linking)
-# - Vulkan: for in-container GPU via Venus/virtio-gpu driver
-# - RPC: for offloading GPU work to host Metal via rpc-server
 RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cpp \
     && cd /tmp/llama.cpp \
     && cmake -B build \
@@ -36,13 +34,19 @@ RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /tmp/llama.cp
     && cp build/bin/llama-server /usr/local/bin/ \
     && rm -rf /tmp/llama.cpp
 
-# Install Claude Code CLI for agent mode
-RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+# Install OpenClaw (AI agent framework)
+RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || true \
+    && npm install -g @openclaw/cli 2>/dev/null || true
+
+# Clone OpenClaw for self-hosted mode
+RUN git clone --depth 1 https://github.com/openclaw/openclaw.git /opt/openclaw \
+    && cd /opt/openclaw \
+    && npm install --production 2>/dev/null || true
 
 # Sandbox user and directories
 RUN useradd -m -s /bin/bash sandbox \
-    && mkdir -p /models /sandbox /etc/metalclaw \
-    && chown sandbox:sandbox /sandbox
+    && mkdir -p /models /sandbox /etc/metalclaw /home/sandbox/.openclaw \
+    && chown -R sandbox:sandbox /sandbox /home/sandbox/.openclaw
 
 # Entrypoint and agent scripts
 COPY metalclaw-start.sh /usr/local/bin/metalclaw-start.sh

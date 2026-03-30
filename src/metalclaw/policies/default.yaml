@@ -2,24 +2,25 @@ version: 1
 name: default
 description: Deny-all network policy with localhost inference access
 
-# Filesystem isolation (enforced via podman --read-only + tmpfs)
 filesystem_policy:
   read_only_root: true
+  include_workdir: true
   read_write:
     - /sandbox
     - /tmp
+    - /dev/null
   read_only:
     - /usr
     - /lib
     - /etc
+    - /proc
+    - /dev/urandom
 
-# Process isolation (enforced via podman --user)
+landlock:
+  compatibility: best_effort
+
 process:
   run_as_user: sandbox
   run_as_group: sandbox
 
-# Network isolation (enforced via podman pasta network mode)
-network_policies:
-  default_action: deny
-  allow_localhost: true
-  allowed_endpoints: []
+network_policies: {}

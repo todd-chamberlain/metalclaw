@@ -9,7 +9,11 @@ from pathlib import Path
 from rich.console import Console
 
 from metalclaw.config import load_config
-from metalclaw.policy import NetworkPolicy, policy_to_podman_network
+from metalclaw.policy import (
+    NetworkPolicy,
+    SandboxPolicy,
+    policy_to_podman_args,
+)
 
 console = Console()
 
@@ -21,6 +25,9 @@ CONTAINER_DIR = _SRC_CONTAINER_DIR if _SRC_CONTAINER_DIR.exists() else _PKG_CONT
 
 # Ensure podman talks to the libkrun machine, not applehv
 _LIBKRUN_ENV = {**os.environ, "CONTAINERS_MACHINE_PROVIDER": "libkrun"}
+
+# Maximum log tail to prevent resource exhaustion
+MAX_LOG_TAIL = 10000
 
 
 def _podman(*args: str, check: bool = True,
@@ -102,7 +109,8 @@ def container_running(name: str | None = None) -> bool:
 
 def start_container(
     model_path: Path,
-    policy: NetworkPolicy | None = None,
+    sandbox_policy: SandboxPolicy | None = None,
+    network_policy: NetworkPolicy | None = None,
     agent_type: str = "none",
     agent_command: str = "",
     gpu_backend: str = "vulkan",
@@ -112,9 +120,10 @@ def start_container(
 
     Args:
         model_path: Path to the GGUF model file.
-        policy: Network policy to apply.
+        sandbox_policy: Full sandbox policy (filesystem + process + network).
+        network_policy: Network policy (used if sandbox_policy not provided).
         agent_type: Agent type (none, claude-code, custom).
-        agent_command: Custom agent command.
+        agent_command: Custom agent command (validated for safety).
         gpu_backend: GPU backend (metal, vulkan, cpu).
         inference_url: URL of host inference server (metal mode).
     """
@@ -130,21 +139,19 @@ def start_container(
     if container_exists(name):
         _podman("rm", name, check=False)
 
-    # Determine network mode from policy
-    network = "none"
-    if policy:
-        network = policy_to_podman_network(policy)
+    # Resolve policies from SandboxPolicy or fallback to legacy args
+    if sandbox_policy:
+        fs_policy = sandbox_policy.filesystem
+        proc_policy = sandbox_policy.process
+        net_policy = sandbox_policy.network
+    else:
+        fs_policy = None
+        proc_policy = None
+        net_policy = network_policy
 
     # Resource limits from config
     mem_limit = cfg["sandbox"]["memory_limit"]
     cpus = cfg["sandbox"]["cpus"]
-
-    # Filesystem policy: read-only root with writable /sandbox and /tmp
-    fs_policy = cfg.get("filesystem_policy", {})
-    read_only_root = fs_policy.get("read_only_root", True)
-
-    # Process policy
-    process_policy = cfg.get("process", {})
 
     # Build run command
     cmd = [
@@ -153,30 +160,35 @@ def start_container(
         f"--memory={mem_limit}",
         f"--cpus={cpus}",
         "--pids-limit=4096",
-        f"--network={network}",
         "-e", f"GPU_BACKEND={gpu_backend}",
         "-e", f"AGENT_TYPE={agent_type}",
         "-e", f"PORT={port}",
     ]
 
-    # Filesystem isolation
+    # Network isolation from policy
+    if net_policy:
+        cmd.extend(policy_to_podman_args(net_policy))
+    else:
+        cmd.append("--network=pasta")
+
+    # Filesystem isolation -- always enforce from policy or defaults
+    read_only_root = fs_policy.read_only_root if fs_policy else True
     if read_only_root:
         cmd.append("--read-only")
         cmd.extend(["--tmpfs", "/tmp:rw,nosuid,nodev,size=1g"])
         cmd.extend(["--tmpfs", "/sandbox:rw,nosuid,nodev,size=10g"])
 
-    # Process isolation
-    run_user = process_policy.get("run_as_user", "")
-    if run_user:
-        cmd.extend(["--user", run_user])
+    # Process isolation -- always default to sandbox user
+    run_user = proc_policy.run_as_user if proc_policy else "sandbox"
+    if not run_user:
+        run_user = "sandbox"
+    cmd.extend(["--user", run_user])
 
     if gpu_backend == "metal" and inference_url:
         # Metal mode: inference runs on host, container is agent/workspace only
         cmd.extend([
             "-e", f"INFERENCE_URL={inference_url}",
         ])
-        # Don't need port mapping -- inference API is already on the host
-        # But map a port for any in-container services if needed
     else:
         # Vulkan/CPU mode: inference runs in container
         cmd.extend([
@@ -188,7 +200,9 @@ def start_container(
             "-e", f"GPU_LAYERS={gpu_layers}",
         ])
 
+    # Agent command -- validate before passing to container
     if agent_command:
+        _validate_agent_command(agent_command)
         cmd.extend(["-e", f"AGENT_COMMAND={agent_command}"])
 
     cmd.append(IMAGE_NAME)
@@ -203,6 +217,17 @@ def start_container(
     except (subprocess.SubprocessError, RuntimeError) as e:
         console.print(f"[red]Error starting container: {e}[/red]")
         return False
+
+
+def _validate_agent_command(command: str) -> None:
+    """Validate agent command for shell injection risks."""
+    dangerous = {"$(", "`", "&&", "||", ";", "|", ">", "<", "\n"}
+    for pattern in dangerous:
+        if pattern in command:
+            raise ValueError(
+                f"Agent command contains disallowed shell metacharacter: {pattern!r}. "
+                "Use a simple command without shell operators."
+            )
 
 
 def stop_container(name: str | None = None) -> bool:
@@ -225,8 +250,6 @@ def stop_container(name: str | None = None) -> bool:
 
 def exec_shell(name: str | None = None) -> None:
     """Exec into container with interactive shell (replaces current process)."""
-    import os
-
     cfg = load_config()
     name = name or cfg["sandbox"]["name"]
 
@@ -246,6 +269,9 @@ def get_logs(name: str | None = None, tail: int = 100) -> str:
     """Get container logs (non-streaming). Use 'metalclaw logs -f' for follow mode."""
     cfg = load_config()
     name = name or cfg["sandbox"]["name"]
+
+    # Cap tail to prevent resource exhaustion
+    tail = min(tail, MAX_LOG_TAIL)
 
     if not container_exists(name):
         return "Container does not exist"

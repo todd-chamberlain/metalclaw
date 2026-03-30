@@ -8,6 +8,7 @@ server via the network.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import signal
 import subprocess
@@ -24,6 +25,7 @@ LLAMA_CPP_DIR = METALCLAW_HOME / "llama-cpp"
 BIN_DIR = METALCLAW_HOME / "bin"
 LLAMA_SERVER_BIN = BIN_DIR / "llama-server"
 PID_FILE = STATE_DIR / "llama-server.pid"
+MODEL_FILE = STATE_DIR / "llama-server.model"  # Track which model is running
 
 
 def check_build_deps() -> bool:
@@ -81,11 +83,18 @@ def build_server(force: bool = False) -> bool:
             return False
     else:
         console.print("Updating llama.cpp...")
-        subprocess.run(
+        result = subprocess.run(
             ["git", "pull", "--ff-only"],
             cwd=str(LLAMA_CPP_DIR),
             capture_output=True, text=True, timeout=60, check=False,
         )
+        if result.returncode != 0:
+            console.print(
+                f"[yellow]Warning: git pull failed (rc={result.returncode}), "
+                f"building with existing source[/yellow]"
+            )
+            if result.stderr:
+                console.print(f"[dim]{result.stderr.strip()[:200]}[/dim]")
 
     # Build with Metal backend
     console.print("Building llama-server with Metal backend (this may take a few minutes)...")
@@ -133,17 +142,55 @@ def build_server(force: bool = False) -> bool:
     return True
 
 
+def _read_pid_file() -> int | None:
+    """Read PID from file with file locking to prevent TOCTOU races."""
+    if not PID_FILE.exists():
+        return None
+    try:
+        with open(PID_FILE) as f:
+            fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            try:
+                pid = int(f.read().strip())
+                return pid
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except (ValueError, OSError):
+        return None
+
+
+def _write_pid_file(pid: int, model_path: str = "") -> None:
+    """Write PID to file with file locking."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(PID_FILE, "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(str(pid))
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    # Also record which model is running
+    if model_path:
+        MODEL_FILE.write_text(model_path)
+
+
 def server_running() -> bool:
     """Check if host llama-server is running."""
-    if not PID_FILE.exists():
+    pid = _read_pid_file()
+    if pid is None:
         return False
     try:
-        pid = int(PID_FILE.read_text().strip())
         os.kill(pid, 0)  # signal 0 = check existence
         return True
-    except (ValueError, OSError):
+    except OSError:
         PID_FILE.unlink(missing_ok=True)
+        MODEL_FILE.unlink(missing_ok=True)
         return False
+
+
+def _running_model() -> str:
+    """Get the model path of the currently running server."""
+    if MODEL_FILE.exists():
+        return MODEL_FILE.read_text().strip()
+    return ""
 
 
 def start_server(
@@ -159,8 +206,17 @@ def start_server(
     gpu_layers = gpu_layers if gpu_layers is not None else cfg["gpu"]["layers"]
 
     if server_running():
-        console.print("[green]Host llama-server already running[/green]")
-        return True
+        # Check if the running server is using the same model
+        running_model = _running_model()
+        if running_model and running_model != str(model_path):
+            console.print(
+                f"[yellow]Server running with different model ({Path(running_model).name}), "
+                f"restarting with {model_path.name}...[/yellow]"
+            )
+            stop_server()
+        else:
+            console.print("[green]Host llama-server already running[/green]")
+            return True
 
     if not LLAMA_SERVER_BIN.exists():
         console.print("[red]llama-server not built. Run: metalclaw onboard[/red]")
@@ -190,15 +246,15 @@ def start_server(
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        # Save PID
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        PID_FILE.write_text(str(proc.pid))
+        # Save PID and model path
+        _write_pid_file(proc.pid, str(model_path))
 
         # Brief check that it didn't crash immediately
         time.sleep(1)
         if proc.poll() is not None:
             console.print("[red]llama-server exited immediately[/red]")
             PID_FILE.unlink(missing_ok=True)
+            MODEL_FILE.unlink(missing_ok=True)
             return False
 
         console.print(f"[green]Metal inference server started (PID {proc.pid})[/green]")
@@ -212,10 +268,14 @@ def stop_server() -> bool:
     """Stop the host llama-server."""
     if not server_running():
         PID_FILE.unlink(missing_ok=True)
+        MODEL_FILE.unlink(missing_ok=True)
+        return True
+
+    pid = _read_pid_file()
+    if pid is None:
         return True
 
     try:
-        pid = int(PID_FILE.read_text().strip())
         console.print(f"Stopping Metal inference server (PID {pid})...")
         os.kill(pid, signal.SIGTERM)
         # Wait up to 10 seconds for graceful shutdown
@@ -233,9 +293,11 @@ def stop_server() -> bool:
                 pass
 
         PID_FILE.unlink(missing_ok=True)
+        MODEL_FILE.unlink(missing_ok=True)
         console.print("[green]Metal inference server stopped[/green]")
         return True
     except (ValueError, OSError) as e:
         console.print(f"[red]Error stopping server: {e}[/red]")
         PID_FILE.unlink(missing_ok=True)
+        MODEL_FILE.unlink(missing_ok=True)
         return False

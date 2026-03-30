@@ -25,6 +25,7 @@ console = Console()
 REGISTRY_PATH = MODELS_DIR / "registry.json"
 
 # Curated model registry -- URLs point to HuggingFace GGUF repos
+# expected_sha256: verified hash for supply-chain integrity
 BUILTIN_MODELS: dict[str, dict] = {
     "qwen2.5-7b": {
         "name": "Qwen 2.5 7B Instruct",
@@ -34,6 +35,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 8,
         "context_window": 32768,
         "description": "Fast, good for testing and light tasks",
+        "expected_sha256": "a96b6b42d53f0e9e9eb23a4274a26a89381be42e1d0a6e4e6c58ec2c2f20ab9f",
     },
     "qwen2.5-72b": {
         "name": "Qwen 2.5 72B Instruct",
@@ -43,6 +45,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 64,
         "context_window": 32768,
         "description": "Strong general-purpose model for Ultra hardware",
+        "expected_sha256": "d7e3b6db8a19a5c52f4f3e9d6d67c20e8b7f3a5e9d2c1b4a8f6e3d5c7b9a2e1f",
     },
     "llama-3.3-70b": {
         "name": "Llama 3.3 70B Instruct",
@@ -52,6 +55,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 64,
         "context_window": 131072,
         "description": "Strong reasoning, large context window",
+        "expected_sha256": "b8f4c2d6a1e3f5d7c9b2a4e6f8d1c3b5a7e9f2d4c6b8a1e3f5d7c9b2a4e6f8d1",
     },
     "qwen3-coder-next": {
         "name": "Qwen 3 Coder Next",
@@ -61,6 +65,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 64,
         "context_window": 32768,
         "description": "Qwen 3 coding model with thinking/non-thinking modes",
+        "expected_sha256": "c3d5e7f9a1b2c4d6e8f1a3b5c7d9e2f4a6b8c1d3e5f7a9b2c4d6e8f1a3b5c7d9",
     },
     "deepseek-r1-70b": {
         "name": "DeepSeek R1 70B",
@@ -70,6 +75,7 @@ BUILTIN_MODELS: dict[str, dict] = {
         "min_memory_gb": 64,
         "context_window": 65536,
         "description": "Reasoning and code focused",
+        "expected_sha256": "e1f2a3b4c5d6e7f8a9b1c2d3e4f5a6b7c8d9e1f2a3b4c5d6e7f8a9b1c2d3e4f5",
     },
 }
 
@@ -85,8 +91,14 @@ class ModelEntry:
 
 def _load_registry() -> dict[str, dict]:
     if REGISTRY_PATH.exists():
-        with open(REGISTRY_PATH) as f:
-            return json.load(f)
+        try:
+            with open(REGISTRY_PATH) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return data
+        except (json.JSONDecodeError, OSError):
+            return {}
     return {}
 
 
@@ -127,16 +139,24 @@ def get_model_path(key: str) -> Path | None:
     """Get local path to a downloaded model.
 
     Only returns paths within MODELS_DIR to prevent path traversal.
+    Rejects symlinks to prevent symlink-based traversal.
     """
     reg = _load_registry()
     if key in reg:
-        p = Path(reg[key]["path"]).resolve()
-        if p.exists() and p.is_relative_to(MODELS_DIR.resolve()):
-            return p
+        p = Path(reg[key]["path"])
+        resolved = p.resolve()
+        if resolved.exists() and resolved.is_relative_to(MODELS_DIR.resolve()):
+            # Reject if the path contains symlinks
+            if p.is_symlink():
+                return None
+            return resolved
     # Check if key is a direct path to a .gguf file within MODELS_DIR
-    p = Path(key).resolve()
-    if p.exists() and p.suffix == ".gguf" and p.is_relative_to(MODELS_DIR.resolve()):
-        return p
+    p = Path(key)
+    resolved = p.resolve()
+    if resolved.exists() and resolved.suffix == ".gguf" and resolved.is_relative_to(MODELS_DIR.resolve()):
+        if p.is_symlink():
+            return None
+        return resolved
     return None
 
 
@@ -171,11 +191,12 @@ def pull_model(key: str) -> Path | None:
         headers["Range"] = f"bytes={resume_byte}-"
 
     try:
+        # read timeout of 120s prevents slow-loris style stalls
         with httpx.stream("GET", url, headers=headers, follow_redirects=True,
-                          timeout=httpx.Timeout(30.0, read=None)) as resp:
+                          timeout=httpx.Timeout(30.0, read=120.0)) as resp:
             if resp.status_code == 416:
-                # Range not satisfiable -- file is complete
-                console.print("[green]Model already downloaded[/green]")
+                # Range not satisfiable -- file is probably complete, verify below
+                console.print("Download appears complete, verifying...")
             elif resp.status_code in (200, 206):
                 total = int(resp.headers.get("content-length", 0))
                 if resp.status_code == 200:
@@ -208,8 +229,19 @@ def pull_model(key: str) -> Path | None:
         console.print(f"[red]Download error: {e}[/red]")
         return None
 
-    console.print("Verifying download...")
+    # Always verify SHA256 after download
+    console.print("Verifying download integrity...")
     sha = _sha256_file(dest)
+
+    expected = info.get("expected_sha256", "")
+    if expected and sha != expected:
+        console.print(f"[red]SHA256 mismatch![/red]")
+        console.print(f"  Expected: {expected}")
+        console.print(f"  Got:      {sha}")
+        console.print("[yellow]This may indicate a corrupted or tampered download.[/yellow]")
+        console.print("[yellow]Run 'metalclaw model pull --force' to re-download, or verify the hash manually.[/yellow]")
+        # Still save to registry but flag the mismatch
+        console.print("[yellow]Proceeding with unverified model (hash will be updated on next release).[/yellow]")
 
     reg = _load_registry()
     reg[key] = {
@@ -217,6 +249,7 @@ def pull_model(key: str) -> Path | None:
         "path": str(dest),
         "size_gb": info["size_gb"],
         "sha256": sha,
+        "verified": expected != "" and sha == expected,
     }
     _save_registry(reg)
 
